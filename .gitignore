@@ -1,0 +1,9 @@
+# Personal video files — keep these off git; they're private & large.
+media/*
+!media/README.txt
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log
+node_modules/
