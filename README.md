@@ -13,25 +13,30 @@ runs full-screen and offline.
 
 ## What it does
 
-- **Calm grid** of 3–6 large, muted-color tiles a toddler can tap.
-- **Curated YouTube** — paste approved video or playlist links; plays via the
-  official YouTube IFrame player (privacy `nocookie` host), then returns to the
-  grid on end. (Needs a connection.)
+- **Calm grid** of large, muted-color tiles with **real show artwork** a
+  toddler can recognise (a pre-reader knows the puffin, not the word).
+- **🔎 In-app search-to-add** — type a show name and add it without leaving the
+  app: a **YouTube** search (results + thumbnails) and a **cross-service** search
+  (find any show, see *where to watch* it, add a tile that links straight to
+  **that show** — not the whole app).
+- **Curated YouTube** — plays via the official IFrame player (privacy `nocookie`
+  host), then returns to the grid on end.
 - **Local videos (offline)** — drop your own `.mp4` files in `/media` and play
   them with zero connection. The most reliable choice for a flight.
-- **Open another app** — optional one-way deep-link tiles to Netflix Kids, PBS
-  Kids, or Apple TV (these apps are DRM-protected and can't play *inside* this
-  app — it hands off, you switch back by hand).
 - **Calm ending** — every show ends on a quiet "All done" 🌙 card, never an
   autoplay cliff. This is the core anti-dysregulation feature.
-- **Grown-up Settings** — PIN-gated (default **1357**). Add/remove/reorder
-  shows, change the PIN, restore the starter set.
+- **Calm controls** — Today's-picks (⭐ star a small grid), mute-by-default, and
+  a gentle "all done for now" time limit.
+- **Backup & twin sync** — export your library and import it on the second iPad.
+- **Grown-up Settings** — PIN-gated (default **1357**). Add via search or
+  manually, reorder, star, change the PIN, restore the starter set.
 
 ### What it deliberately does *not* do
-- No search, no recommendations, no comments, no Shorts, no autoplay-next.
+- No search, recommendations, comments, Shorts, or autoplay-next **for the
+  child** (search lives only behind the grown-up PIN).
 - It **cannot** embed or stream Netflix / Apple TV+ video — those are DRM-locked
-  with no public API. For those, use the deep-link tiles (older child / home) or
-  pre-downloaded episodes inside their own apps.
+  with no public API. Those tiles deep-link to the exact show; for in-app,
+  calm-ending playback use YouTube or local `.mp4` files.
 
 ---
 
@@ -62,13 +67,62 @@ python3 -m http.server 8080
 
 ## Add your own shows
 
-Tap the dimmed **⚙️** (top-right), enter the PIN (**1357** by default), then:
+Tap the dimmed **⚙️** (top-right), enter the PIN (**1357** by default).
+
+### 🔎 Search & add (the easy way — never leave the app)
+
+Once you've added free API keys (one-time, below), use the **Search & add**
+box at the top of Settings:
+
+- **▶️ YouTube tab** — type e.g. *"Sesame Street Brandi Carlile"*, see results
+  with thumbnails, tap **Add**. The show lands on the grid with its real artwork.
+- **📺 Shows tab** — type e.g. *"Puffin Rock"*, see posters, tap a show to see
+  **where to watch** it in your region, then pick a service (Netflix / Apple TV /
+  PBS / Disney+ / …). That adds a tile that deep-links straight to **that show**
+  — not the whole app.
+
+> Honest note: Netflix/Apple TV+ are DRM-locked with no public API, so a "Shows"
+> tile still *opens their app* (to that exact title's page), it can't play inside
+> Calm Screens. For fully in-app, calm-ending playback use the YouTube tab or
+> local `.mp4` files.
+
+### One-time API keys (≈2 minutes, free)
+
+In Settings → **Search keys**:
+
+- **YouTube Data API key** — go to [console.cloud.google.com](https://console.cloud.google.com/),
+  create a project, enable **"YouTube Data API v3"**, then **Credentials → Create
+  credentials → API key**. Paste the `AIza…` key. (Free quota ≈ 100 searches/day.)
+- **TMDB API key** — make a free account at
+  [themoviedb.org](https://www.themoviedb.org/settings/api), request an API key,
+  and paste either the **v3 key** or the **v4 bearer token** (both work).
+- **Region** — your 2-letter country code (e.g. `US`) for accurate "where to watch".
+
+No keys? The app still works fully — you just add shows manually instead of
+searching.
+
+### Manual add (Advanced)
 
 - **YouTube** — paste any `youtu.be/…`, `watch?v=…`, or playlist `…list=…`
-  link, or a bare ID. A curated *playlist of one calm show* works well.
-- **Local video** — copy your `.mp4` into the `media/` folder, then set the
-  path, e.g. `media/puffin-rock.mp4`.
+  link, or a bare ID.
+- **Local video** — copy your `.mp4` into `media/`, then set the path,
+  e.g. `media/puffin-rock.mp4`.
 - **Open another app** — paste a Netflix / PBS / Apple TV link.
+
+### Calm settings
+
+- **Today's picks only** — ⭐ star a few shows in the list; the grid shows just
+  those, keeping it tiny and calm even with a big library behind it.
+- **Mute by default** — every show starts silent (great on a plane; many of
+  these shows carry on the visuals alone). A 🔊 toggle is on the player.
+- **Gentle time limit** — after N minutes a calm "all done for now" appears;
+  a grown-up taps ⚙️ (PIN) to start a fresh session.
+
+### Backup & twin sync
+
+**Copy library** / **Save file** exports your shows + calm settings (PIN and API
+keys stay private). On the second iPad, paste it under **Import** and choose
+**Replace** or **Merge** — so you set everything up once for both twins.
 
 Change the PIN from the same screen. Forgot the PIN? Clear the app's site data
 in Safari settings (this resets to the starter set + default PIN).
