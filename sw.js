@@ -1,6 +1,6 @@
 /* sw.js — offline app shell + on-demand local media caching.
  * Bump CACHE when you change app files so iPad picks up the new version. */
-var CACHE = "calm-screens-v1";
+var CACHE = "calm-screens-v2";
 
 var SHELL = [
   "./",

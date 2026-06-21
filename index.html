@@ -35,6 +35,9 @@
     <button id="backBtn" class="back-btn" aria-label="All done, go back">
       <span aria-hidden="true">←</span>
     </button>
+    <button id="muteBtn" class="mute-btn" aria-label="Mute or unmute" hidden>
+      <span aria-hidden="true">🔊</span>
+    </button>
     <div id="ytHolder" class="media-holder" hidden>
       <div id="ytFrame"></div>
       <!-- transparent touch-blockers over the YouTube logo / "watch on YouTube" corners -->
@@ -83,17 +86,82 @@
           <button id="cgCloseBtn" class="cg-close">Done</button>
         </div>
 
+        <!-- SEARCH & ADD: the primary flow — never leave the app to find a link -->
+        <section class="cg-section">
+          <h3>Search & add</h3>
+          <div class="search-tabs">
+            <button class="search-tab is-active" data-tab="yt">▶️ YouTube</button>
+            <button class="search-tab" data-tab="show">📺 Shows · where to watch</button>
+          </div>
+
+          <div id="searchYt" class="search-pane">
+            <form id="ytSearchForm" class="search-bar" autocomplete="off">
+              <input id="ytQuery" type="search" placeholder="e.g. Sesame Street Brandi Carlile" />
+              <button type="submit">Search</button>
+            </form>
+            <p id="ytSearchMsg" class="search-msg"></p>
+            <div id="ytResults" class="results"></div>
+          </div>
+
+          <div id="searchShow" class="search-pane" hidden>
+            <form id="showSearchForm" class="search-bar" autocomplete="off">
+              <input id="showQuery" type="search" placeholder="e.g. Puffin Rock, Stillwater…" />
+              <button type="submit">Search</button>
+            </form>
+            <p id="showSearchMsg" class="search-msg"></p>
+            <div id="showResults" class="results"></div>
+          </div>
+        </section>
+
+        <!-- the curated grid, with star (Today's picks) + reorder + remove -->
         <section class="cg-section">
           <h3>Shows on the grid</h3>
           <ul id="cgList" class="cg-list"></ul>
         </section>
 
+        <!-- calm-UX toggles -->
         <section class="cg-section">
-          <h3>Add a show</h3>
+          <h3>Calm settings</h3>
+          <label class="toggle">
+            <span><strong>Today's picks only</strong><br><small>Show just the ⭐ starred shows on the grid</small></span>
+            <input type="checkbox" id="setStarred" />
+          </label>
+          <label class="toggle">
+            <span><strong>Mute by default</strong><br><small>Start every show silent (good on a plane)</small></span>
+            <input type="checkbox" id="setMute" />
+          </label>
+          <label class="fld fld--row">
+            <span><strong>Gentle time limit</strong><br><small>Calm "all done for now" after this many minutes. 0 = off.</small></span>
+            <input type="number" id="setLimit" min="0" max="180" step="5" inputmode="numeric" />
+          </label>
+        </section>
+
+        <!-- backup & twin sync -->
+        <section class="cg-section">
+          <h3>Backup &amp; twin sync</h3>
+          <p class="add-note">Copy your library to set up the other iPad the same way. (PIN and API keys stay private to each device.)</p>
+          <div class="btn-row">
+            <button id="exportCopyBtn" class="cg-add-btn cg-add-btn--soft">Copy library</button>
+            <button id="exportFileBtn" class="cg-add-btn cg-add-btn--soft">Save file</button>
+          </div>
+          <details class="advanced">
+            <summary>Paste a library to import</summary>
+            <textarea id="importBox" class="import-box" placeholder="Paste the copied library here…"></textarea>
+            <div class="btn-row">
+              <button id="importReplaceBtn" class="cg-add-btn cg-add-btn--soft">Replace</button>
+              <button id="importMergeBtn" class="cg-add-btn cg-add-btn--soft">Merge</button>
+            </div>
+            <p id="importMsg" class="add-note"></p>
+          </details>
+        </section>
+
+        <!-- manual add (advanced) -->
+        <details class="cg-section advanced">
+          <summary>Add manually (link, playlist, or local file)</summary>
           <form id="addForm" class="add-form" autocomplete="off">
             <label class="fld">
               <span>Name</span>
-              <input id="addLabel" type="text" placeholder="Puffin Rock" required />
+              <input id="addLabel" type="text" placeholder="Puffin Rock" />
             </label>
             <label class="fld">
               <span>Type</span>
@@ -105,7 +173,7 @@
             </label>
             <label class="fld" id="fldSource">
               <span id="srcLabel">YouTube link or ID</span>
-              <input id="addSource" type="text" placeholder="https://youtu.be/… or video ID" required />
+              <input id="addSource" type="text" placeholder="https://youtu.be/… or video ID" />
             </label>
             <label class="fld">
               <span>Emoji (shown on the tile)</span>
@@ -114,7 +182,29 @@
             <p id="addNote" class="add-note"></p>
             <button type="submit" class="cg-add-btn">Add to grid</button>
           </form>
-        </section>
+        </details>
+
+        <!-- API keys (advanced) — enables in-app search -->
+        <details class="cg-section advanced">
+          <summary>Search keys (one-time setup)</summary>
+          <p class="add-note">In-app search needs free API keys. Paste them once and you'll never leave the app to find a link again. See README for the 2-minute how-to.</p>
+          <form id="keysForm" class="add-form" autocomplete="off">
+            <label class="fld">
+              <span>YouTube Data API key</span>
+              <input id="ytKey" type="text" placeholder="AIza…" />
+            </label>
+            <label class="fld">
+              <span>TMDB API key (for show search)</span>
+              <input id="tmdbKey" type="text" placeholder="eyJ… or a v3 key" />
+            </label>
+            <label class="fld">
+              <span>Region (where to watch)</span>
+              <input id="regionKey" type="text" maxlength="2" placeholder="US" />
+            </label>
+            <button type="submit" class="cg-add-btn cg-add-btn--soft">Save keys</button>
+            <span id="keysSaved" class="saved-msg" hidden>Saved ✓</span>
+          </form>
+        </details>
 
         <section class="cg-section">
           <h3>Change PIN</h3>
