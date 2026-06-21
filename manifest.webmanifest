@@ -1,0 +1,15 @@
+{
+  "name": "Calm Screens",
+  "short_name": "Calm Screens",
+  "description": "A calm, low-stimulation video grid for toddlers. Curated YouTube and local videos, no autoplay, no algorithm.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#1b2440",
+  "theme_color": "#1b2440",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

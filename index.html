@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1b2440" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Calm Screens" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="description" content="A calm, low-stimulation video grid for toddlers. Curated YouTube and local videos, no autoplay, no algorithm." />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <title>Calm Screens</title>
+</head>
+<body>
+  <!-- HOME: the calm grid -->
+  <main id="home" class="screen is-active" aria-label="Choose a show">
+    <header class="home-header">
+      <h1 class="home-title">Calm Screens</h1>
+      <button id="caregiverBtn" class="gear-btn" aria-label="Grown-up settings" title="Grown-up settings">
+        <span aria-hidden="true">⚙️</span>
+      </button>
+    </header>
+    <div id="grid" class="grid" role="list"></div>
+    <p id="emptyHint" class="empty-hint" hidden>
+      No shows yet. Tap the ⚙️ to add some.
+    </p>
+  </main>
+
+  <!-- PLAYER: full-screen calm player -->
+  <section id="player" class="screen player" aria-label="Now playing" aria-hidden="true">
+    <button id="backBtn" class="back-btn" aria-label="All done, go back">
+      <span aria-hidden="true">←</span>
+    </button>
+    <div id="ytHolder" class="media-holder" hidden>
+      <div id="ytFrame"></div>
+      <!-- transparent touch-blockers over the YouTube logo / "watch on YouTube" corners -->
+      <div class="yt-block yt-block--tr" aria-hidden="true"></div>
+      <div class="yt-block yt-block--br" aria-hidden="true"></div>
+      <div class="yt-block yt-block--tl" aria-hidden="true"></div>
+    </div>
+    <video id="localVideo" class="media-holder" playsinline webkit-playsinline preload="auto" hidden></video>
+    <div id="endCard" class="end-card" hidden>
+      <div class="end-card__moon" aria-hidden="true">🌙</div>
+      <p class="end-card__text">All done</p>
+      <button id="endBackBtn" class="end-card__btn">Back to shows</button>
+    </div>
+  </section>
+
+  <!-- CAREGIVER: PIN-gated settings -->
+  <section id="caregiver" class="screen caregiver" aria-label="Grown-up settings" aria-hidden="true">
+    <div class="cg-inner">
+      <!-- PIN gate -->
+      <div id="pinGate" class="pin-gate">
+        <h2>Grown-ups only</h2>
+        <p class="pin-sub">Enter PIN</p>
+        <div id="pinDots" class="pin-dots"><span></span><span></span><span></span><span></span></div>
+        <div class="pin-pad">
+          <button class="pin-key" data-key="1">1</button>
+          <button class="pin-key" data-key="2">2</button>
+          <button class="pin-key" data-key="3">3</button>
+          <button class="pin-key" data-key="4">4</button>
+          <button class="pin-key" data-key="5">5</button>
+          <button class="pin-key" data-key="6">6</button>
+          <button class="pin-key" data-key="7">7</button>
+          <button class="pin-key" data-key="8">8</button>
+          <button class="pin-key" data-key="9">9</button>
+          <button class="pin-key pin-key--ghost" data-key="cancel">✕</button>
+          <button class="pin-key" data-key="0">0</button>
+          <button class="pin-key pin-key--ghost" data-key="del">⌫</button>
+        </div>
+        <p id="pinError" class="pin-error" hidden>Wrong PIN</p>
+        <p class="pin-hint">Default PIN is <strong>1357</strong> — change it below after unlocking.</p>
+      </div>
+
+      <!-- Settings panel -->
+      <div id="cgPanel" class="cg-panel" hidden>
+        <div class="cg-topbar">
+          <h2>Settings</h2>
+          <button id="cgCloseBtn" class="cg-close">Done</button>
+        </div>
+
+        <section class="cg-section">
+          <h3>Shows on the grid</h3>
+          <ul id="cgList" class="cg-list"></ul>
+        </section>
+
+        <section class="cg-section">
+          <h3>Add a show</h3>
+          <form id="addForm" class="add-form" autocomplete="off">
+            <label class="fld">
+              <span>Name</span>
+              <input id="addLabel" type="text" placeholder="Puffin Rock" required />
+            </label>
+            <label class="fld">
+              <span>Type</span>
+              <select id="addType">
+                <option value="youtube">YouTube video or playlist</option>
+                <option value="local">Local video file (offline)</option>
+                <option value="link">Open another app (Netflix / PBS / Apple TV)</option>
+              </select>
+            </label>
+            <label class="fld" id="fldSource">
+              <span id="srcLabel">YouTube link or ID</span>
+              <input id="addSource" type="text" placeholder="https://youtu.be/… or video ID" required />
+            </label>
+            <label class="fld">
+              <span>Emoji (shown on the tile)</span>
+              <input id="addEmoji" type="text" maxlength="4" placeholder="🐧" />
+            </label>
+            <p id="addNote" class="add-note"></p>
+            <button type="submit" class="cg-add-btn">Add to grid</button>
+          </form>
+        </section>
+
+        <section class="cg-section">
+          <h3>Change PIN</h3>
+          <form id="pinForm" class="add-form" autocomplete="off">
+            <label class="fld">
+              <span>New 4-digit PIN</span>
+              <input id="newPin" type="text" inputmode="numeric" pattern="\d{4}" maxlength="4" placeholder="1357" />
+            </label>
+            <button type="submit" class="cg-add-btn cg-add-btn--soft">Save PIN</button>
+            <span id="pinSaved" class="saved-msg" hidden>Saved ✓</span>
+          </form>
+        </section>
+
+        <section class="cg-section cg-section--muted">
+          <h3>Reset</h3>
+          <button id="resetBtn" class="cg-reset">Restore starter shows</button>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <script src="js/content.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
