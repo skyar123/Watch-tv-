@@ -99,18 +99,63 @@ sample of well-known shows. The feed is full-bleed with **no TMDB key at all**.
 
 Confusing these silently yields undefined show names.
 
+## Trailers without a key
+
+TMDB is the authoritative source for trailer keys and needs one. Since the feed
+is worthless without trailers, `/api/trailer` falls back to a **scored YouTube
+search** when TMDB is unavailable.
+
+Measured on 13 shows: **12 resolved the correct official trailer, 1 correctly
+refused.** Two corrections were needed, both found by looking at real results:
+
+| Problem | Real example | Rule added |
+|---|---|---|
+| A film sharing the series' name | `El Camino: A Breaking Bad Movie \| Official Trailer \| Netflix` won the search for *Breaking Bad* | the show name must head the title, before any separator; film-shaped titles rejected |
+| A short name matching as a substring | *Special* got `Sherlock Special: Official TV Trailer - BBC` | the leading segment must equal the name or start with it on a word boundary, after stripping season/year noise and a leading article |
+
+After both rules, *Special* finds nothing — which is the correct answer for a
+one-word title with no distinctive results.
+
+Every candidate is checked with `youtube.com/oembed`, which returns 200 only
+for a public, embeddable video, so a card never mounts a player for something
+that will refuse to play.
+
+A searched match is **never** called exact. The card says "Trailer matched by
+search, not confirmed" below high confidence, and the detail sheet names the
+matched video and channel with a link to check it.
+
+**Rate limiting is real.** YouTube redirects to a consent wall after a handful
+of rapid searches from one IP — enough to break the feed after three cards.
+Answers are cached in Netlify Blobs plus a module-scope memo, keyed on name and
+year only, so a show is searched once. A rate-limit response is never cached;
+it says nothing about the show.
+
 ## TMDB
 
 Reachable, and returns `401 Invalid API key` without one, so the wiring is
-proven even though the shapes are not. **No feature in this app claims TMDB
-data until `npm run verify:tmdb` passes on a real key.** Without the key the
-app runs on TVmaze alone and labels every gap:
+proven even though the shapes are not. **No feature claims TMDB data until
+`npm run verify:tmdb` passes on a real key.** Without the key:
 
-| Missing | Shown as |
+| Feature | Without a TMDB key |
 |---|---|
-| Trailer | "No trailer — TMDB key not set on this deploy" |
+| Trailer | works — YouTube search fallback, labelled as a search match |
 | Providers | "No provider data" |
 | Cancelled status | "cancellation can only be confirmed from TMDB, which is unavailable on this deploy" |
+
+## Netlify Blobs
+
+Two things that cost a deploy each, recorded so they are not rediscovered:
+
+- **Functions v1 does not receive the Blobs context.** `export const handler`
+  made `getStore()` throw on every request. The trailer cache silently fell
+  back to a per-instance memo and sync was dead — every response still 200.
+  Both are Functions v2 now.
+- **Blobs reads are eventually consistent by default.** The household function
+  is read-modify-write, so an eventual read came back empty every time and each
+  phone's push replaced the other's instead of merging. All stores now use
+  `consistency: 'strong'`.
+- A scheduled function may not also declare a custom `path`. That combination
+  fails the build.
 
 ## RSS
 

@@ -241,14 +241,22 @@ export default function SettingsScreen({ onClose }) {
           What this deploy actually knows
         </h3>
         <ul className="space-y-1.5 text-[12.5px] text-haze-200">
-          <li className="flex justify-between">
-            <span>TMDB (trailers, providers, cancelled status)</span>
-            <span className={tmdbAvailable() ? 'text-mint' : 'text-gold'}>
+          <li className="flex justify-between gap-3">
+            <span>TVmaze — episodes, ratings, artwork</span>
+            <span className="shrink-0 text-mint">no key needed</span></li>
+          <li className="flex justify-between gap-3">
+            {/* Trailers no longer depend on TMDB, and saying they do here was
+                the one line in Settings that had gone out of date. */}
+            <span>Trailers</span>
+            <span className="shrink-0 text-mint">
+              {tmdbAvailable() ? 'TMDB' : 'YouTube search'}
+            </span></li>
+          <li className="flex justify-between gap-3">
+            <span>TMDB — watch providers, cancelled status</span>
+            <span className={`shrink-0 ${tmdbAvailable() ? 'text-mint' : 'text-gold'}`}>
               {tmdbAvailable() ? 'available' : 'no API key'}
             </span>
           </li>
-          <li className="flex justify-between"><span>TVmaze (episodes, ratings, art)</span>
-            <span className="text-mint">no key needed</span></li>
           <li className="flex justify-between"><span>Hand-checked endings</span>
             <span className="text-haze-400">{cov.endings} shows</span></li>
           <li className="flex justify-between"><span>Hand-checked content descriptors</span>

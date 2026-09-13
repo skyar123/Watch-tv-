@@ -24,12 +24,48 @@ you choose. This is only the choosing part.
 | **Queer and disability representation** | First-class tags with a note on why each show qualifies. Hand-written, because no API can tell you whether a character matters to the plot. |
 | **What is happening?** | 13 news feeds merged; seven are queer publications. |
 | **Never show me this again** | One tap, gone from every list. |
+| **Who is watching?** | Two people share one link. Each has their own services, saves, progress, hidden shows and learned taste, plus a Together mode for deciding as a pair. |
 
 ## Screens
 
-| Feed | Detail | Tonight | News |
+| Feed | Detail | Tonight | Together |
 |---|---|---|---|
-| ![](shots/01-feed.png) | ![](shots/04-detail-decisions.png) | ![](shots/06b-tonight-queer.png) | ![](shots/09-news.png) |
+| ![](shots/01-feed.png) | ![](shots/04-detail-decisions.png) | ![](shots/06b-tonight-queer.png) | ![](shots/10-together.png) |
+
+| News | Search | Profiles & sync | Taste |
+|---|---|---|---|
+| ![](shots/09-news.png) | ![](shots/08-search.png) | ![](shots/11-settings-profiles.png) | ![](shots/12-settings-taste.png) |
+
+## Two people, one link
+
+Skylar and Anja each get their own space. **Together** is not a third person:
+it keeps its own list, but reads both of you for filtering — services are the
+union, because you watch on one screen and either subscription works, and
+anything either of you has hidden stays hidden.
+
+The feed is ordered by a taste model learned from what each person does:
+finished +3, saved +2, started +1, hidden −3, over the features the data
+actually has (genre, runtime band, era, network, status, and the hand-checked
+representation tags). It never shows a score. Every weight traces back to the
+shows that produced it:
+
+> *drama and science-fiction — like Dark and Severance*
+>
+> *Skylar likes drama, and Anja likes queer stories.*
+
+Below a handful of signals it labels itself as guessing.
+
+**Sync** between two phones is a household code plus a Netlify Blobs document,
+merged last-write-wins per profile. The code is obscurity, not security, and
+Settings says so in those words.
+
+## Trailers with no API key
+
+Every card autoplays a trailer whether or not TMDB is configured.
+`/api/trailer` tries TMDB, then falls back to a scored YouTube search —
+12 of 13 test shows resolved the correct official trailer and the 13th
+correctly refused rather than guessing. A searched match is labelled as one.
+See [the caveats](docs/DATA-SOURCES.md#trailers-without-a-key).
 
 ## The rule this is built on
 
@@ -59,7 +95,9 @@ npm run verify           # call every source, print real rows
 npm run verify:tmdb      # same, including TMDB (needs TMDB_API_KEY)
 npm run build
 npm run shots            # drive it in an iPhone viewport, capture screenshots
-node scripts/test-sw.mjs # prove the service worker's caching rules
+npm test                 # curated ids, service worker, trailers, interactions
+node scripts/test-sw.mjs         # the service worker's four caching rules
+node scripts/test-trailer.mjs    # trailer resolution against live YouTube
 node scripts/check-curated.mjs   # every hand-written note points at the right show
 ```
 
@@ -82,6 +120,8 @@ no-ops safely without a key.
 ```
 catalog/
   netlify/functions/
+    trailer.js                TMDB first, scored YouTube search as fallback
+    household.js              sync between the two phones
     tmdb.js                   TMDB proxy — key stays server-side, named ops only
     news.js                   merges 13 RSS feeds, reports per-source failures
     availability-snapshot.js  nightly provider diff → "leaving soon"
@@ -95,7 +135,7 @@ catalog/
       recommend.js  explainable similarity; no bare scores
       kidsafe.js    content-based verdict with an explicit "not checked"
       providers.js  service matching, with aliases so nothing is wrongly hidden
-      store.js      all your state, localStorage, exportable
+      store.js      profiles, localStorage, exportable
     data/
       curated.js    hand-checked endings, content and representation
       feeds.js      the news sources, each one verified
