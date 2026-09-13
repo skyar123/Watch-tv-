@@ -1,0 +1,35 @@
+# Netlify reads this from the site's *base directory*. In the Netlify UI set
+# Base directory = catalog, so this repo can keep hosting the other app at root.
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to   = "/.netlify/functions/:splat"
+  status = 200
+
+# SPA fallback, but never for the service worker or the manifest.
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
+
+# The service worker must never be served from a stale HTTP cache or the app
+# can get permanently stuck on an old worker.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
