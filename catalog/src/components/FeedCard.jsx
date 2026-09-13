@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Bookmark, BookmarkCheck, EyeOff, Info, Play } from 'lucide-react';
+import { Bookmark, BookmarkCheck, EyeOff, Info, Sparkles } from 'lucide-react';
 import TrailerLayer from './TrailerLayer.jsx';
 import { StatusBadge, ProviderRow, HoursChip, Unknown } from './bits.jsx';
 
@@ -33,7 +33,9 @@ function FeedCard({
           // The first two cards are what the user sees on open; everything else
           // waits, so a long scroll does not fetch fifty backdrops at once.
           loading={index < 2 ? 'eager' : 'lazy'}
-          fetchPriority={index === 0 ? 'high' : 'auto'}
+          // React 18 passes this through only in lowercase; the camelCase form
+          // lands in the DOM as an unknown attribute and warns.
+          fetchpriority={index === 0 ? 'high' : 'auto'}
           decoding="async"
           draggable="false"
         />
@@ -114,6 +116,21 @@ function FeedCard({
             <ProviderRow availability={availability} compact />
           </div>
 
+          {/* Why this card, in this order. The feed is curated per person, and
+              a curated order that will not say why is just an opaque ranking. */}
+          {show._why && (
+            <p className="text-shadow-soft mt-2 flex items-start gap-1.5 text-[12px]
+                          leading-snug text-mint/90">
+              <Sparkles size={12} className="mt-0.5 shrink-0" />
+              <span>
+                {show._why}
+                {show._confidence === 'guessing' && (
+                  <span className="ml-1 text-haze-400">(early guess — still learning you)</span>
+                )}
+              </span>
+            </p>
+          )}
+
           {!trailerKey && active && (
             <p className="mt-2">
               <Unknown>
@@ -134,15 +151,13 @@ function FeedCard({
           )}
 
           {/* A searched trailer is a good guess, not a fact. TMDB's is a fact.
-              Say which, so a wrong video is recognisable as a wrong guess
-              rather than looking like the show. */}
+              One short line here so a wrong video reads as a guess; the matched
+              video's title and channel are on the detail sheet, where there is
+              room for them. */}
           {trailerKey && active && enriched?.trailerSource === 'youtube-search' &&
            enriched.trailerConfidence !== 'high' && (
-            <p className="mt-2">
-              <Unknown>
-                Trailer matched by search — “{enriched.trailerTitle}”
-                {enriched.trailerChannel ? ` from ${enriched.trailerChannel}` : ''}
-              </Unknown>
+            <p className="mt-1.5">
+              <Unknown>Trailer matched by search, not confirmed</Unknown>
             </p>
           )}
         </div>

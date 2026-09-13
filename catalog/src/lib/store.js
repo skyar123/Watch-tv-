@@ -1,136 +1,331 @@
 /**
- * All of this user's state, in localStorage. One user, one phone, no accounts.
+ * State for two people sharing one link.
  *
- * Everything is namespaced under one key so it exports and re-imports in one
- * piece, and every write bumps a version stamp so a future migration can tell
- * what it is looking at.
+ * Skylar and Anja each get their own space — their own services, saved shows,
+ * episode progress, hidden shows and learned taste — and there is a third mode,
+ * Together, for deciding what to watch as a pair.
+ *
+ * Together is not a third person. It keeps its own list of what you plan to
+ * watch together, but for FILTERING it reads from both people: the services are
+ * the union (you watch on one screen, so either subscription works), and a show
+ * either of you has hidden is hidden, because "not for me" from one half of a
+ * sofa is a no.
+ *
+ * Everything is namespaced under one key so it exports in one piece, and the
+ * whole object is what syncs between the two phones.
  */
 import { useSyncExternalStore } from 'react';
 
-const KEY = 'tonight:v1';
+const KEY = 'tonight:v2';
+const LEGACY_KEY = 'tonight:v1';
 
-const EMPTY = {
-  version: 1,
-  services: ['Netflix', 'Hulu', 'Amazon Prime Video'],  // editable in Settings
-  hideUnavailable: false,
+export const TOGETHER = 'together';
+
+const emptyProfile = (name, emoji) => ({
+  name,
+  emoji,
+  services: ['Netflix', 'Hulu', 'Amazon Prime Video'],
   saved: {},        // showKey -> { addedAt, name, poster }
   watched: {},      // showKey -> { [episodeId]: watchedAt }
-  notForMe: {},     // showKey -> hiddenAt        (removes it from every list)
-  seen: {},         // showKey -> lastSeenInFeedAt (so the feed stops repeating)
-  providerLog: {},  // showKey -> [{ at, names[] }]  the "leaving soon" diff trail
-  moodLog: [],      // { at, mood, pickedKey }
+  notForMe: {},     // showKey -> hiddenAt
+  seen: {},         // showKey -> lastSeenInFeedAt
+  providerLog: {},  // showKey -> [{ at, names[] }]
+  moodLog: [],
+  taste: { likes: {}, dislikes: {}, explicit: {} },   // see lib/taste.js
+  updatedAt: 0,
+});
+
+const randomId = () => Math.random().toString(36).slice(2, 6) + Math.random().toString(36).slice(2, 6);
+
+const EMPTY = {
+  version: 2,
+  household: null,          // shared id; both phones use the same one to sync
+  active: 'p1',
+  hideUnavailable: false,
+  profiles: {
+    p1: emptyProfile('Skylar', '🌙'),
+    p2: emptyProfile('Anja', '✨'),
+    [TOGETHER]: emptyProfile('Together', '🛋️'),
+  },
+  lastSyncAt: 0,
   updatedAt: 0,
 };
 
-let state = load();
-const listeners = new Set();
+/**
+ * v1 stored one unnamed person's data at the top level. Fold it into the first
+ * profile rather than dropping it — that data is someone's watch history.
+ */
+function migrate(v1) {
+  const next = structuredClone(EMPTY);
+  next.profiles.p1 = {
+    ...next.profiles.p1,
+    services: v1.services || next.profiles.p1.services,
+    saved: v1.saved || {},
+    watched: v1.watched || {},
+    notForMe: v1.notForMe || {},
+    seen: v1.seen || {},
+    providerLog: v1.providerLog || {},
+    moodLog: v1.moodLog || [],
+  };
+  next.hideUnavailable = Boolean(v1.hideUnavailable);
+  next.migratedFrom = 'v1';
+  return next;
+}
 
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...EMPTY };
-    const parsed = JSON.parse(raw);
-    return { ...EMPTY, ...parsed };
-  } catch { return { ...EMPTY }; }
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Merge against EMPTY so a profile added in a later version appears.
+      return {
+        ...EMPTY, ...parsed,
+        profiles: { ...EMPTY.profiles, ...(parsed.profiles || {}) },
+      };
+    }
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) return migrate(JSON.parse(legacy));
+  } catch { /* private mode, or corrupt; start clean rather than crash */ }
+  return structuredClone(EMPTY);
 }
+
+let state = load();
+const listeners = new Set();
 
 function commit(next) {
   state = { ...next, updatedAt: Date.now() };
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* private mode / full */ }
+  cachedFor = null;
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* full or blocked */ }
   listeners.forEach(l => l());
 }
 
+/** Write into one profile, stamping it so sync can resolve by recency. */
+function patchProfile(id, patch) {
+  const cur = state.profiles[id];
+  if (!cur) return;
+  commit({
+    ...state,
+    profiles: { ...state.profiles, [id]: { ...cur, ...patch, updatedAt: Date.now() } },
+  });
+}
+
 export function subscribe(l) { listeners.add(l); return () => listeners.delete(l); }
-export function getState() { return state; }
-export function useStore(selector = s => s) {
-  return useSyncExternalStore(subscribe, () => selector(getState()), () => selector(EMPTY));
+export function getRaw() { return state; }
+
+const mergeMaps = (a = {}, b = {}) => ({ ...a, ...b });
+
+/**
+ * The shape every screen reads. Keeping the v1 field names means the screens
+ * did not have to learn about profiles at all.
+ */
+export function view(s = state) {
+  const id = s.active;
+  const me = s.profiles[id] || s.profiles.p1;
+  const people = Object.entries(s.profiles).filter(([k]) => k !== TOGETHER);
+
+  if (id !== TOGETHER) {
+    return {
+      ...me,
+      profileId: id,
+      isTogether: false,
+      profiles: s.profiles,
+      household: s.household,
+      hideUnavailable: s.hideUnavailable,
+      lastSyncAt: s.lastSyncAt,
+      // Who else is on this link, for the Together copy.
+      others: people.filter(([k]) => k !== id).map(([k, p]) => ({ id: k, ...p })),
+    };
+  }
+
+  // Together: own lists, but both people's filters.
+  const tog = s.profiles[TOGETHER];
+  return {
+    ...tog,
+    profileId: TOGETHER,
+    isTogether: true,
+    profiles: s.profiles,
+    household: s.household,
+    hideUnavailable: s.hideUnavailable,
+    lastSyncAt: s.lastSyncAt,
+    others: people.map(([k, p]) => ({ id: k, ...p })),
+    // Union: you watch together on one screen, so either subscription works.
+    services: [...new Set(people.flatMap(([, p]) => p.services))],
+    // A no from either half of the sofa is a no.
+    notForMe: people.reduce((a, [, p]) => mergeMaps(a, p.notForMe), { ...tog.notForMe }),
+    // Anything either of you has already seen counts as seen together.
+    watched: people.reduce((a, [, p]) => mergeMaps(a, p.watched), { ...tog.watched }),
+    savedByEither: people.reduce((a, [, p]) => mergeMaps(a, p.saved), {}),
+  };
+}
+
+/**
+ * useSyncExternalStore compares snapshots by identity. view() builds a fresh
+ * object every call, so returning it directly made React see a change on every
+ * render and loop until it threw "maximum update depth exceeded". The snapshot
+ * is therefore memoised against the state object it was derived from, and only
+ * recomputed when a commit actually replaces that object.
+ */
+let cachedView = null;
+let cachedFor = null;
+function snapshot() {
+  if (cachedFor !== state) { cachedFor = state; cachedView = view(state); }
+  return cachedView;
+}
+
+const SERVER_VIEW = view(EMPTY);
+const serverSnapshot = () => SERVER_VIEW;
+
+export function useStore() {
+  return useSyncExternalStore(subscribe, snapshot, serverSnapshot);
 }
 
 // ───────────────────────────────────────────────────────────────── mutations
 export const actions = {
-  save(show) {
-    commit({ ...state, saved: { ...state.saved,
-      [show.key]: { addedAt: Date.now(), name: show.name, poster: show.poster } } });
+  switchProfile(id) {
+    if (!state.profiles[id]) return;
+    commit({ ...state, active: id });
   },
-  unsave(key) {
-    const saved = { ...state.saved }; delete saved[key];
-    commit({ ...state, saved });
-  },
-  toggleSave(show) {
-    state.saved[show.key] ? actions.unsave(show.key) : actions.save(show);
+  renameProfile(id, name, emoji) {
+    patchProfile(id, { name: name.slice(0, 24), ...(emoji ? { emoji } : {}) });
   },
 
-  /** One tap, gone from every list. Reversible from Settings. */
+  save(show) {
+    const id = state.active;
+    const p = state.profiles[id];
+    patchProfile(id, {
+      saved: { ...p.saved, [show.key]: { addedAt: Date.now(), name: show.name, poster: show.poster } },
+    });
+  },
+  unsave(key) {
+    const id = state.active;
+    const saved = { ...state.profiles[id].saved };
+    delete saved[key];
+    patchProfile(id, { saved });
+  },
+  toggleSave(show) {
+    state.profiles[state.active].saved[show.key] ? actions.unsave(show.key) : actions.save(show);
+  },
+
+  /**
+   * One tap, gone from every list — for the person who tapped it. In Together
+   * it hides for the pair only; neither person's own feed is edited on their
+   * behalf, because that is their call to make.
+   */
   notForMe(show) {
-    const saved = { ...state.saved }; delete saved[show.key];
-    commit({ ...state, saved, notForMe: { ...state.notForMe, [show.key]: Date.now() } });
+    const id = state.active;
+    const p = state.profiles[id];
+    const saved = { ...p.saved };
+    delete saved[show.key];
+    patchProfile(id, { saved, notForMe: { ...p.notForMe, [show.key]: Date.now() } });
   },
   unhide(key) {
-    const n = { ...state.notForMe }; delete n[key];
-    commit({ ...state, notForMe: n });
+    const id = state.active;
+    const n = { ...state.profiles[id].notForMe };
+    delete n[key];
+    patchProfile(id, { notForMe: n });
   },
 
   markWatched(showKey, episodeId, on = true) {
-    const forShow = { ...(state.watched[showKey] || {}) };
+    const id = state.active;
+    const p = state.profiles[id];
+    const forShow = { ...(p.watched[showKey] || {}) };
     if (on) forShow[episodeId] = Date.now(); else delete forShow[episodeId];
-    commit({ ...state, watched: { ...state.watched, [showKey]: forShow } });
+    patchProfile(id, { watched: { ...p.watched, [showKey]: forShow } });
   },
-  /** Mark everything up to and including an episode — the realistic gesture. */
   markThrough(showKey, episodes, episode) {
-    const forShow = { ...(state.watched[showKey] || {}) };
+    const id = state.active;
+    const p = state.profiles[id];
+    const forShow = { ...(p.watched[showKey] || {}) };
     const at = Date.now();
     for (const e of episodes) {
       const before = e.season < episode.season ||
                      (e.season === episode.season && e.number <= episode.number);
       if (before) forShow[e.id] = forShow[e.id] || at;
     }
-    commit({ ...state, watched: { ...state.watched, [showKey]: forShow } });
+    patchProfile(id, { watched: { ...p.watched, [showKey]: forShow } });
   },
   clearShowProgress(showKey) {
-    const w = { ...state.watched }; delete w[showKey];
-    commit({ ...state, watched: w });
+    const id = state.active;
+    const w = { ...state.profiles[id].watched };
+    delete w[showKey];
+    patchProfile(id, { watched: w });
   },
 
-  setServices(list) { commit({ ...state, services: list }); },
+  setServices(list) { patchProfile(state.active, { services: list }); },
   setHideUnavailable(v) { commit({ ...state, hideUnavailable: Boolean(v) }); },
-  markSeen(key) { commit({ ...state, seen: { ...state.seen, [key]: Date.now() } }); },
+  markSeen(key) {
+    const id = state.active;
+    const p = state.profiles[id];
+    if (p.seen[key] && Date.now() - p.seen[key] < 60000) return;   // do not thrash storage
+    patchProfile(id, { seen: { ...p.seen, [key]: Date.now() } });
+  },
   logMood(mood, pickedKey) {
-    commit({ ...state, moodLog: [...state.moodLog.slice(-99), { at: Date.now(), mood, pickedKey }] });
+    const id = state.active;
+    const p = state.profiles[id];
+    patchProfile(id, { moodLog: [...p.moodLog.slice(-99), { at: Date.now(), mood, pickedKey }] });
   },
 
-  /**
-   * The "leaving soon" trail. Each time we see a show's provider set we append
-   * it — but only when it actually CHANGED, so the log stays small and every
-   * entry is a real transition with a date on it.
-   */
+  /** Explicit taste switches, set by hand in Settings. */
+  setExplicitTaste(patch) {
+    const id = state.active;
+    const p = state.profiles[id];
+    patchProfile(id, { taste: { ...p.taste, explicit: { ...p.taste.explicit, ...patch } } });
+  },
+
   logProviders(showKey, names) {
-    const log = state.providerLog[showKey] || [];
+    const id = state.active;
+    const p = state.profiles[id];
+    const log = p.providerLog[showKey] || [];
     const last = log[log.length - 1];
     const same = last && last.names.length === names.length &&
                  last.names.every((n, i) => n === names[i]);
     if (same) return null;
     const entry = { at: Date.now(), names: [...names] };
-    commit({ ...state, providerLog: { ...state.providerLog, [showKey]: [...log, entry].slice(-12) } });
+    patchProfile(id, { providerLog: { ...p.providerLog, [showKey]: [...log, entry].slice(-12) } });
     return last ? { from: last.names, to: names, since: last.at } : null;
   },
 
-  importAll(obj) { commit({ ...EMPTY, ...obj }); },
-  reset() { commit({ ...EMPTY }); },
+  // ── household sync ───────────────────────────────────────────────────────
+  ensureHousehold() {
+    if (state.household) return state.household;
+    const h = randomId();
+    commit({ ...state, household: h });
+    return h;
+  },
+  setHousehold(code) {
+    commit({ ...state, household: String(code).trim().toLowerCase().slice(0, 24) || null });
+  },
+  /** Replace one profile wholesale, used when a pull brings in the other phone's copy. */
+  applyRemoteProfile(id, profile) {
+    const cur = state.profiles[id];
+    // Last write wins per profile. Each profile is normally edited on one
+    // phone, so this is almost never a real conflict.
+    if (cur && (cur.updatedAt || 0) >= (profile.updatedAt || 0)) return false;
+    commit({ ...state, profiles: { ...state.profiles, [id]: profile } });
+    return true;
+  },
+  noteSync(at = Date.now()) { commit({ ...state, lastSyncAt: at }); },
+
+  importAll(obj) {
+    if (obj?.version === 2) commit({ ...EMPTY, ...obj });
+    else if (obj?.version === 1) commit(migrate(obj));
+  },
+  reset() { commit(structuredClone(EMPTY)); },
 };
 
 /** Provider changes across saved shows: what gained a service, what lost one. */
-export function providerChanges(s = state) {
+export function providerChanges(v) {
   const out = [];
-  for (const [key, log] of Object.entries(s.providerLog)) {
+  for (const [key, log] of Object.entries(v.providerLog || {})) {
     if (log.length < 2) continue;
     const prev = log[log.length - 2], now = log[log.length - 1];
     const lost = prev.names.filter(n => !now.names.includes(n));
     const gained = now.names.filter(n => !prev.names.includes(n));
     if (!lost.length && !gained.length) continue;
-    out.push({ key, name: s.saved[key]?.name || key, at: now.at, lost, gained,
-               nowOn: now.names, saved: Boolean(s.saved[key]) });
+    out.push({ key, name: v.saved[key]?.name || key, at: now.at, lost, gained,
+               nowOn: now.names, saved: Boolean(v.saved[key]) });
   }
   return out.sort((a, b) => b.at - a.at);
 }
 
-export const watchedSet = (s, key) => new Set(Object.keys(s.watched[key] || {}).map(Number));
+export const watchedSet = (v, key) => new Set(Object.keys(v.watched?.[key] || {}).map(Number));

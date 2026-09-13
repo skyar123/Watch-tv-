@@ -256,6 +256,25 @@ export default function ShowDetail({ show, enriched, loading, onClose }) {
             </Block>
           )}
 
+          {enriched?.trailerKey && enriched.trailerSource === 'youtube-search' && (
+            <Block title="About that trailer">
+              <p className="text-[12.5px] leading-snug text-haze-200">
+                Matched by searching YouTube, not confirmed by a database:
+                “{enriched.trailerTitle}”{enriched.trailerChannel ? ` from ${enriched.trailerChannel}` : ''}.
+              </p>
+              <Reason confidence={enriched.trailerConfidence}>
+                {enriched.trailerConfidence === 'high'
+                  ? 'The title leads with this show and the channel is the network that made it.'
+                  : 'A reasonable match, but nothing verified that this is the right video.'}
+              </Reason>
+              <a href={`https://www.youtube.com/watch?v=${enriched.trailerKey}`}
+                 target="_blank" rel="noreferrer"
+                 className="mt-1 inline-flex items-center gap-1 text-[12px] text-mint">
+                Check it on YouTube <ExternalLink size={12} />
+              </a>
+            </Block>
+          )}
+
           {enriched?.matchConfidence === 'low' && (
             <p className="text-[11px] text-gold/90">
               TMDB data on this page came from a title-only match, so it may be the wrong show.

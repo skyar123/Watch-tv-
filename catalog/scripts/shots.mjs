@@ -70,7 +70,7 @@ const shot = async (name, ms = 900) => {
 console.log('→ feed');
 await page.goto(BASE, { waitUntil: 'networkidle', timeout: 45000 });
 await page.waitForSelector('.feed-card', { timeout: 25000 });
-await shot('01-feed', 5000);
+await shot('01-feed', 7000);
 
 // Prove the scroll-snap actually snaps: scroll a partial card height and check
 // we land exactly on a card boundary rather than between two.
@@ -118,6 +118,26 @@ await shot('06b-tonight-queer', 1500);
 console.log('→ mine');
 await page.locator('nav button', { hasText: 'Mine' }).click();
 await shot('07-mine', 1200);
+
+console.log('→ together');
+await page.locator('nav button', { hasText: 'Tonight' }).click();
+await page.waitForTimeout(300);
+await page.locator('button', { hasText: 'Together' }).first().click();
+await page.waitForTimeout(600);
+await page.locator('button', { hasText: 'A good story' }).first().click();
+await shot('10-together', 2000);
+
+console.log('→ settings: profiles, taste, sync');
+await page.locator('nav button', { hasText: 'Mine' }).click();
+await page.waitForTimeout(300);
+await page.locator('button[aria-label="Settings"]').click();
+await page.waitForSelector('[role="dialog"]');
+await page.waitForTimeout(700);
+await shot('11-settings-profiles', 600);
+await page.locator('[role="dialog"] .sheet-scroll').evaluate(el => el.scrollTo({ top: 780 }));
+await shot('12-settings-taste', 600);
+await page.keyboard.press('Escape');
+await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 8000 });
 
 console.log('→ news');
 await page.locator('nav button', { hasText: 'News' }).click();

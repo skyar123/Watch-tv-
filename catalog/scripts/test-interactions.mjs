@@ -33,12 +33,15 @@ await page.waitForSelector('.feed-card', { timeout: 25000 });
 await page.waitForTimeout(4000);
 
 console.log('save from the feed');
-const before = await page.evaluate(() =>
-  Object.keys(JSON.parse(localStorage.getItem('tonight:v1') || '{}').saved || {}).length);
+// Storage is v2 now: one object holding a profile per person.
+const activeProfile = () => page.evaluate(() => {
+  const s = JSON.parse(localStorage.getItem('tonight:v2') || '{}');
+  return s.profiles?.[s.active] || {};
+});
+const before = Object.keys((await activeProfile()).saved || {}).length;
 await page.locator('.feed-card button[aria-label*="Save to your list"]').first().click();
 await page.waitForTimeout(300);
-const after = await page.evaluate(() =>
-  Object.keys(JSON.parse(localStorage.getItem('tonight:v1') || '{}').saved || {}).length);
+const after = Object.keys((await activeProfile()).saved || {}).length;
 check('save writes to storage', after === before + 1, `${before} → ${after}`);
 
 console.log('episode tracker');
@@ -64,19 +67,17 @@ check('counter reads 3 watched', /^3 of /.test(p1), p1);
 const upNext = await page.locator('[role="dialog"]').locator('text=/Up next:/').first().innerText();
 check('up-next advanced past the watched ones', /E4\b/.test(upNext) || /E[4-9]/.test(upNext), upNext);
 
-const stored = await page.evaluate(() => {
-  const s = JSON.parse(localStorage.getItem('tonight:v1') || '{}');
-  return Object.values(s.watched || {}).reduce((a, o) => a + Object.keys(o).length, 0);
-});
+const countWatched = async () => {
+  const p = await activeProfile();
+  return Object.values(p.watched || {}).reduce((a, o) => a + Object.keys(o).length, 0);
+};
+const stored = await countWatched();
 check('watched episodes persisted', stored === 3, `${stored} in localStorage`);
 
 console.log('reload keeps progress');
 await page.reload({ waitUntil: 'networkidle' });
 await page.waitForSelector('.feed-card', { timeout: 25000 });
-const stored2 = await page.evaluate(() => {
-  const s = JSON.parse(localStorage.getItem('tonight:v1') || '{}');
-  return Object.values(s.watched || {}).reduce((a, o) => a + Object.keys(o).length, 0);
-});
+const stored2 = await countWatched();
 check('progress survives a reload', stored2 === 3, `${stored2} after reload`);
 
 console.log('sheet drag-to-dismiss');
@@ -113,9 +114,52 @@ await page.locator('.feed-card button[aria-label="Not for me"]').first().click()
 await page.waitForTimeout(500);
 const nowFirst = await page.locator('.feed-card h2').first().innerText();
 check('hidden show left the feed', nowFirst !== firstName, `"${firstName}" → "${nowFirst}"`);
-const hidden = await page.evaluate(() =>
-  Object.keys(JSON.parse(localStorage.getItem('tonight:v1') || '{}').notForMe || {}).length);
+const hidden = Object.keys((await activeProfile()).notForMe || {}).length;
 check('hide persisted', hidden === 1, `${hidden} hidden`);
+
+console.log('profiles keep separate lists');
+await page.locator('nav button', { hasText: 'Mine' }).click();
+await page.waitForTimeout(500);
+const savedAsP1 = Object.keys((await activeProfile()).saved || {}).length;
+// Switch to the second person.
+await page.locator('button', { hasText: 'Anja' }).first().click();
+await page.waitForTimeout(500);
+const who = await page.evaluate(() => JSON.parse(localStorage.getItem('tonight:v2')).active);
+check('switching profile changes who is active', who === 'p2', `active=${who}`);
+const savedAsP2 = Object.keys((await activeProfile()).saved || {}).length;
+check('the second person starts with their own empty list',
+  savedAsP2 === 0 && savedAsP1 >= 0, `p1 saved ${savedAsP1}, p2 saved ${savedAsP2}`);
+
+const p2Watched = await countWatched();
+check('and their own progress', p2Watched === 0, `${p2Watched} episodes`);
+
+// Hidden shows must not leak between people either.
+const p2Hidden = Object.keys((await activeProfile()).notForMe || {}).length;
+check('and their own hidden list', p2Hidden === 0, `${p2Hidden} hidden`);
+
+console.log('together reads both people');
+await page.locator('button', { hasText: 'Together' }).first().click();
+await page.waitForTimeout(600);
+const tog = await page.evaluate(() => {
+  const s = JSON.parse(localStorage.getItem('tonight:v2'));
+  const people = Object.entries(s.profiles).filter(([k]) => k !== 'together');
+  return {
+    active: s.active,
+    unionHidden: new Set(people.flatMap(([, p]) => Object.keys(p.notForMe || {}))).size,
+    unionServices: new Set(people.flatMap(([, p]) => p.services)).size,
+  };
+});
+check('together is active', tog.active === 'together');
+check("together inherits both people's hides", tog.unionHidden >= 1, `${tog.unionHidden} hidden between them`);
+check('together combines both service lists', tog.unionServices >= 1, `${tog.unionServices} services`);
+
+// Back to the first person: their data must be exactly as they left it.
+await page.locator('button', { hasText: 'Skylar' }).first().click();
+await page.waitForTimeout(500);
+const backP1 = await activeProfile();
+check("the first person's saves survived the round trip",
+  Object.keys(backP1.saved || {}).length === savedAsP1, `${Object.keys(backP1.saved || {}).length}`);
+check("and their progress", (await countWatched()) === 3, 'episodes still marked');
 
 console.log(`\n${fails ? `${fails} failure(s)` : 'all interactions behave'}`);
 await browser.close();

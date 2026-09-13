@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { RefreshCw, Loader2 } from 'lucide-react';
 import FeedCard from '../components/FeedCard.jsx';
 import { useStore, actions } from '../lib/store.js';
+import ProfileBar from '../components/ProfileBar.jsx';
 import { totalTime } from '../lib/derive.js';
 import { availability } from '../lib/providers.js';
 import { fetchShow } from '../lib/tvmaze.js';
@@ -36,6 +37,13 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
     () => shows.filter(s => !state.notForMe[s.key]),
     [shows, state.notForMe],
   );
+
+  // Switching profile changes the whole order, so start from the top rather
+  // than leaving you halfway down someone else's feed.
+  useEffect(() => {
+    containerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+    setActiveIdx(0);
+  }, [state.profileId]);
 
   // Which card is centred. threshold 0.6 means a card must genuinely own the
   // screen before it starts playing, so a fast flick past does not fire five
@@ -219,9 +227,11 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
     <div className="relative">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start
                       justify-between px-safe pt-safe">
-        <div className="pointer-events-auto mt-1 rounded-full glass px-3 py-1.5
-                        text-[11px] text-haze-300">
-          {activeIdx + 1} / {visible.length} · <Freshness meta={meta} label="" />
+        <div className="pointer-events-auto flex flex-col items-start gap-1.5">
+          <ProfileBar collapsed />
+          <span className="rounded-full glass px-3 py-1 text-[11px] text-haze-300">
+            {activeIdx + 1} / {visible.length} · <Freshness meta={meta} label="" />
+          </span>
         </div>
         <button
           type="button"

@@ -13,7 +13,7 @@ import { HoursChip, StatusBadge, Reason, Unknown } from '../components/bits.jsx'
  * that actually matched in lib/moods.js, so if the reason reads oddly the fix
  * is the predicate, not the copy.
  */
-export default function TonightScreen({ pool, onOpen }) {
+export default function TonightScreen({ pool, ranked, taste, onOpen }) {
   const state = useStore();
   const [mood, setMood] = useState(null);
   const [nonce, setNonce] = useState(0);
@@ -29,9 +29,26 @@ export default function TonightScreen({ pool, onOpen }) {
     availabilityFor: () => ({ known: false, onMine: [] }),
   }), [state]);
 
+  /**
+   * Rank position from the taste model, so a mood's picks come out in the
+   * order that suits whoever is looking rather than in catalogue order.
+   */
+  const tasteRank = useMemo(() => {
+    const m = new Map();
+    (ranked || []).forEach((s, i) => m.set(s.key, { i, why: s._why, both: s._both }));
+    return m;
+  }, [ranked]);
+
   const picks = useMemo(() => {
     if (!mood) return [];
-    const all = pickForMood(mood, pool, ctx);
+    const source = ranked?.length ? ranked : pool;
+    const all = pickForMood(mood, source, ctx)
+      .map(p => {
+        const r = tasteRank.get(p.show.key);
+        // A mood is a hard filter; taste decides the order within it.
+        return { ...p, tasteWhy: r?.why, score: p.score + (r ? Math.max(0, 6 - r.i / 12) : 0) };
+      })
+      .sort((a, b) => b.score - a.score);
     // A little rotation so pressing the mood again gives you something else,
     // without ever showing a worse pick above a better one.
     const top = all.slice(0, 12);
@@ -44,9 +61,14 @@ export default function TonightScreen({ pool, onOpen }) {
   return (
     <div className="px-safe pt-safe">
       <header className="pb-3 pt-2">
-        <h1 className="text-[26px] font-bold tracking-tight">Tonight</h1>
+        <h1 className="text-[26px] font-bold tracking-tight">
+          {state.isTogether ? 'Tonight, together' : `Tonight, ${state.name}`}
+        </h1>
         <p className="mt-0.5 text-[13px] text-haze-400">
-          What are you in the mood for? Every pick says why it was picked.
+          {state.isTogether
+            ? `Picks that suit ${(state.others || []).map(o => o.name).join(' and ')}. ` +
+              'Anything either of you has hidden is out.'
+            : 'What are you in the mood for? Every pick says why it was picked.'}
         </p>
       </header>
 
@@ -113,8 +135,14 @@ export default function TonightScreen({ pool, onOpen }) {
                     <HoursChip time={totalTime(p.show)} />
                   </div>
                   <p className="mt-1.5 text-[12.5px] leading-snug text-haze-200">{p.reason}</p>
+                  {p.tasteWhy && (
+                    <p className="mt-1 flex items-start gap-1 text-[11.5px] leading-snug text-mint">
+                      <Sparkles size={11} className="mt-0.5 shrink-0" />
+                      <span>{p.tasteWhy}</span>
+                    </p>
+                  )}
                   {p.bonuses.length > 0 && (
-                    <p className="mt-1 text-[11px] text-mint">Also: {p.bonuses.join(', ')}.</p>
+                    <p className="mt-1 text-[11px] text-haze-400">Also: {p.bonuses.join(', ')}.</p>
                   )}
                 </div>
               </button>
@@ -123,9 +151,10 @@ export default function TonightScreen({ pool, onOpen }) {
 
           {picks.length > 0 && (
             <p className="mt-3 text-[10.5px] leading-snug text-haze-400">
-              Picked from the {pool.length} shows currently loaded, on genre, runtime, rating and
-              status — the fields the data actually has. Provider filtering applies to shows the
-              feed has already looked up.
+              Picked from the {(ranked?.length || pool.length)} shows currently loaded, on genre,
+              runtime, rating and status — the fields the data actually has. Ordered by
+              {state.isTogether ? ' what suits both of you' : ` what ${state.name} saves, finishes and hides`}
+              {taste?.sampleSize ? `, from ${taste.sampleSize} signal${taste.sampleSize > 1 ? 's' : ''} so far` : ' (nothing learned yet)'}.
             </p>
           )}
         </section>

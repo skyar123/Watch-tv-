@@ -1,15 +1,31 @@
 import { useState } from 'react';
-import { Check, Download, Upload, Trash2, RotateCcw } from 'lucide-react';
+import { Check, Download, Upload, Trash2, RotateCcw, RefreshCw, Users, Copy } from 'lucide-react';
 import { CATALOGUE } from '../lib/providers.js';
-import { useStore, actions } from '../lib/store.js';
+import { useStore, actions, getRaw } from '../lib/store.js';
+import { syncNow } from '../lib/sync.js';
+import ProfileBar, { ProfileHint } from '../components/ProfileBar.jsx';
 import { coverage } from '../data/curated.js';
 import { tmdbAvailable } from '../lib/tmdb.js';
 
 export default function SettingsScreen({ onClose }) {
   const state = useStore();
   const [imported, setImported] = useState(null);
+  const [syncMsg, setSyncMsg] = useState(null);
+  const [codeDraft, setCodeDraft] = useState('');
   const cov = coverage();
   const hidden = Object.entries(state.notForMe);
+
+  const runSync = async () => {
+    setSyncMsg('Syncing…');
+    const code = actions.ensureHousehold();
+    const r = await syncNow();
+    setSyncMsg(r.ok
+      ? `Synced${r.adopted ? `, pulled ${r.adopted} update${r.adopted > 1 ? 's' : ''}` : ' — already up to date'}.`
+      : r.reason === 'blobs_unavailable'
+        ? 'Sync is unavailable on this deploy. Each phone still works on its own.'
+        : `Could not sync (${r.reason}).`);
+    return code;
+  };
 
   const toggle = name => {
     const on = state.services.includes(name);
@@ -44,8 +60,113 @@ export default function SettingsScreen({ onClose }) {
     <div className="space-y-6 px-4 py-4">
       <section>
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-haze-400">
-          What you subscribe to
+          Who is watching
         </h3>
+        <ProfileBar />
+        <ProfileHint />
+        <p className="mt-1.5 text-[11px] leading-snug text-haze-400">
+          Each person has their own services, saved shows, progress and taste.
+          Together keeps its own list but reads both of you: the services are
+          combined, and anything either of you has hidden stays hidden.
+        </p>
+      </section>
+
+      <section>
+        <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase
+                       tracking-wider text-haze-400">
+          <Users size={12} />Share between two phones
+        </h3>
+        <p className="mb-2 text-[12px] leading-snug text-haze-300">
+          Together only works if both phones can see each other's lists. Sync on
+          one phone, then enter the same code on the other.
+        </p>
+        {state.household ? (
+          <div className="rounded-xl border border-white/12 bg-white/[.04] p-3">
+            <p className="text-[11px] text-haze-400">Household code</p>
+            <div className="mt-1 flex items-center gap-2">
+              <code className="select-all rounded-lg bg-black/40 px-2.5 py-1.5 text-[15px]
+                               tracking-widest text-mint">{state.household}</code>
+              <button type="button" onClick={() => navigator.clipboard?.writeText(state.household)}
+                      className="tap rounded-lg border border-white/15 px-2 text-[12px]">
+                <Copy size={14} />
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-haze-400">
+              {state.lastSyncAt
+                ? `Last synced ${new Date(state.lastSyncAt).toLocaleString()}`
+                : 'Not synced yet'}
+            </p>
+          </div>
+        ) : (
+          <p className="text-[12px] text-haze-400">No code yet — sync once to create one.</p>
+        )}
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button type="button" onClick={runSync}
+            className="tap gap-2 rounded-xl border border-mint/35 bg-mint/10 px-3 text-[13px] text-mint">
+            <RefreshCw size={15} />Sync now
+          </button>
+          <form
+            onSubmit={e => { e.preventDefault(); if (codeDraft.trim()) { actions.setHousehold(codeDraft); setCodeDraft(''); runSync(); } }}
+            className="flex gap-2"
+          >
+            <input
+              value={codeDraft}
+              onChange={e => setCodeDraft(e.target.value)}
+              placeholder="Enter their code"
+              autoCapitalize="none" autoCorrect="off" spellCheck="false"
+              className="w-36 rounded-xl border border-white/15 bg-white/[.05] px-3 text-white
+                         placeholder:text-haze-400 focus:border-white/30 focus:outline-none"
+              style={{ minHeight: 44 }}
+              aria-label="Household code"
+            />
+            <button type="submit" className="tap rounded-xl border border-white/15 px-3 text-[13px]">
+              Join
+            </button>
+          </form>
+        </div>
+        {syncMsg && <p className="mt-2 text-[12px] text-haze-200">{syncMsg}</p>}
+        <p className="mt-2 text-[10.5px] leading-snug text-haze-400">
+          The code is a random string, not a password. Anyone who has it can read
+          and write this household's lists. It holds only which shows you saved —
+          no name, no email — but do not treat it as protecting anything else.
+        </p>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-haze-400">
+          {state.isTogether ? 'What you can watch together' : `What ${state.name} subscribes to`}
+        </h3>
+
+        {state.isTogether ? (
+          // In Together the services are a computed union of both people's, so
+          // a toggle here would write to a value the view never reads — a
+          // control that looks live and does nothing. Show the result instead.
+          <div className="rounded-xl border border-white/10 bg-white/[.03] p-3">
+            <div className="flex flex-wrap gap-1.5">
+              {state.services.length === 0 && (
+                <span className="text-[12.5px] text-haze-400">Neither of you has set any services.</span>
+              )}
+              {state.services.map(name => {
+                const meta = CATALOGUE.find(c => c.name === name);
+                const who = (state.others || [])
+                  .filter(o => (o.services || []).includes(name)).map(o => o.name);
+                return (
+                  <span key={name} className="chip border border-white/15 bg-white/[.06] text-white">
+                    <span className="h-2 w-2 rounded-full"
+                          style={{ background: meta?.colour || '#6b7280' }} />
+                    {name}
+                    <span className="text-haze-400">· {who.join(' & ') || 'unknown'}</span>
+                  </span>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[11px] leading-snug text-haze-400">
+              Combined from both of you, because you watch on one screen — either
+              subscription works. Switch to a person above to change theirs.
+            </p>
+          </div>
+        ) : (
         <div className="grid grid-cols-2 gap-2">
           {CATALOGUE.map(s => {
             const on = state.services.includes(s.name);
@@ -63,6 +184,7 @@ export default function SettingsScreen({ onClose }) {
             );
           })}
         </div>
+        )}
 
         <label className="mt-3 flex items-center justify-between gap-3 rounded-xl border
                           border-white/10 bg-white/[.03] px-3 py-2.5" style={{ minHeight: 44 }}>
@@ -78,6 +200,40 @@ export default function SettingsScreen({ onClose }) {
           Off by default: a show you cannot stream is dimmed rather than hidden, so you can
           still see it exists.
         </p>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-haze-400">
+          Tell it what you want more of
+        </h3>
+        <p className="mb-2 text-[11.5px] leading-snug text-haze-400">
+          The feed learns from what you save, finish and hide. These switches say
+          it out loud, and count as much as finishing a show.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            ['rep:queer', 'Queer stories'],
+            ['rep:disability', 'Disability representation'],
+            ['status:ended', 'Finished stories'],
+            ['length:half hour', 'Short episodes'],
+            ['genre:Comedy', 'Comedy'],
+            ['genre:Drama', 'Drama'],
+            ['genre:Science-Fiction', 'Science fiction'],
+            ['genre:Documentary', 'Documentary'],
+          ].map(([feature, label]) => {
+            const on = Boolean(state.taste?.explicit?.[feature]);
+            return (
+              <button key={feature} type="button"
+                onClick={() => actions.setExplicitTaste({ [feature]: !on })}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition
+                  active:scale-[.98] ${on ? 'border-mint/40 bg-mint/10' : 'border-white/10 bg-white/[.02] text-haze-400'}`}
+                style={{ minHeight: 44 }}>
+                <span className="flex-1 text-[13px]">{label}</span>
+                {on && <Check size={14} className="shrink-0 text-mint" />}
+              </button>
+            );
+          })}
+        </div>
       </section>
 
       <section>
