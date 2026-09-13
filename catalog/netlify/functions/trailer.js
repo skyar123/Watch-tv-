@@ -229,38 +229,31 @@ async function fromYouTube(name, year) {
   return null;
 }
 
-const json = (statusCode, body) => ({
-  statusCode,
-  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=0, s-maxage=3600' },
-  body: JSON.stringify(body),
-});
-
-export const handler = async (event) => {
-  const p = event.queryStringParameters || {};
-  const name = (p.name || '').trim();
-  const year = p.year ? String(p.year).slice(0, 4) : null;
-  const tmdbId = p.tmdbId && /^\d+$/.test(p.tmdbId) ? p.tmdbId : null;
-  if (!name) return json(400, { error: 'name_required' });
+/**
+ * The core, independent of any HTTP shape, so the tests can call it directly.
+ * @returns {Promise<object>} the trailer record, cached or freshly resolved
+ */
+export async function resolveTrailer({ name, year = null, tmdbId = null }) {
+  if (!name) return { error: 'name_required' };
 
   // The cache key is derived only from what identifies the show to a viewer,
-  // never from the caller's own id. Keying on a caller-supplied id meant the
-  // same show cached twice under different keys and the two searches returned
-  // two different trailers — so which video you got depended on which screen
-  // asked. The search itself is name-based, so name+year is the honest key.
+  // never from a caller's own id. Keying on a caller-supplied id meant the same
+  // show cached twice under different keys and the two searches returned two
+  // different trailers — so which video you got depended on which screen asked.
   const showKey = `${norm(name)}|${year || ''}`.replace(/[^a-z0-9|]+/g, '-').slice(0, 180);
 
   const memo = memoGet(showKey);
-  if (memo) return json(200, { ...memo, cached: 'memory', ageMs: Date.now() - memo.fetchedAt });
+  if (memo) return { ...memo, cached: 'memory', ageMs: Date.now() - memo.fetchedAt };
 
   let store = null;
-  try { store = getStore('trailers'); } catch { /* Blobs unavailable locally */ }
+  try { store = getStore({ name: 'trailers', consistency: 'strong' }); } catch { /* Blobs unavailable; memo only */ }
 
   if (store) {
     const hit = await store.get(showKey, { type: 'json' }).catch(() => null);
     if (hit) {
       const age = Date.now() - (hit.fetchedAt || 0);
       const ttl = hit.key ? CACHE_MS : MISS_MS;
-      if (age < ttl) { memoSet(showKey, hit); return json(200, { ...hit, cached: 'blob', ageMs: age }); }
+      if (age < ttl) { memoSet(showKey, hit); return { ...hit, cached: 'blob', ageMs: age }; }
     }
   }
 
@@ -272,10 +265,10 @@ export const handler = async (event) => {
   }
 
   if (rateLimited) {
-    // Do not write this to the cache: it says nothing about the show.
-    return json(200, { key: null, source: null, reason: 'youtube_rate_limited',
+    // Never cached: it says nothing about the show.
+    return { key: null, source: null, reason: 'youtube_rate_limited',
       message: 'YouTube is rate limiting trailer lookups right now. Try again shortly.',
-      fetchedAt: Date.now() });
+      fetchedAt: Date.now() };
   }
 
   const result = found
@@ -285,5 +278,26 @@ export const handler = async (event) => {
 
   memoSet(showKey, result);
   if (store) await store.setJSON(showKey, result).catch(() => {});
-  return json(200, { ...result, cached: false, ageMs: 0 });
+  return { ...result, cached: false, ageMs: 0 };
+}
+
+/**
+ * Netlify Functions v2. The v1 `export const handler` signature does not get
+ * the Blobs context injected, so getStore() threw on every request and the
+ * only cache that ever worked was the in-process memo — which dies with the
+ * instance and re-searched YouTube from cold. v2 gets the context.
+ */
+export default async (req) => {
+  const p = Object.fromEntries(new URL(req.url).searchParams);
+  const out = await resolveTrailer({
+    name: (p.name || '').trim(),
+    year: p.year ? String(p.year).slice(0, 4) : null,
+    tmdbId: p.tmdbId && /^\d+$/.test(p.tmdbId) ? p.tmdbId : null,
+  });
+  return Response.json(out, {
+    status: out.error ? 400 : 200,
+    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=3600' },
+  });
 };
+
+export const config = { path: '/api/trailer' };

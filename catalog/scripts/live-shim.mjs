@@ -63,12 +63,20 @@ export async function installLiveApiShim(page, { tmdbKey = process.env.TMDB_API_
   });
 
   await page.route('**/api/trailer**', async route => {
-    const { handler } = await import('../netlify/functions/trailer.js');
-    const url = new URL(route.request().url());
-    const res = await handler({ queryStringParameters: Object.fromEntries(url.searchParams) });
+    const { resolveTrailer } = await import('../netlify/functions/trailer.js');
+    const q = Object.fromEntries(new URL(route.request().url()).searchParams);
+    const out = await resolveTrailer({ name: q.name, year: q.year || null, tmdbId: q.tmdbId || null });
     stats.trailers++;
-    await route.fulfill({ status: res.statusCode, contentType: 'application/json', body: res.body });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
   });
+
+  // Sync needs Netlify Blobs, which does not exist here. Answer the way the
+  // deploy answers when Blobs is missing, so the UI path is the real one.
+  await page.route('**/api/household**', route => route.fulfill({
+    status: 503, contentType: 'application/json',
+    body: JSON.stringify({ error: 'blobs_unavailable',
+      message: 'Sync needs Netlify Blobs, which is not available on this deploy.' }),
+  }));
 
   await page.route('**/api/tmdb**', async route => {
     stats.tmdb++;

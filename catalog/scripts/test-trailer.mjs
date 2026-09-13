@@ -6,7 +6,7 @@
  * Movie | Official Trailer | Netflix" is an official Netflix trailer whose
  * title contains the show name, and it won before the leading-segment rule.
  */
-import { handler } from '../netlify/functions/trailer.js';
+import { resolveTrailer } from '../netlify/functions/trailer.js';
 
 const CASES = [
   { name: 'Severance', year: 2022, expect: 'found' },
@@ -23,9 +23,7 @@ const CASES = [
 let fails = 0;
 for (const c of CASES) {
   await new Promise(r => setTimeout(r, 2600));     // stay under the consent wall
-  const res = await handler({ queryStringParameters:
-    { name: c.name, year: String(c.year), key: `test:${c.name}` } });
-  const b = JSON.parse(res.body);
+  const b = await resolveTrailer({ name: c.name, year: String(c.year) });
 
   if (b.reason === 'youtube_rate_limited') {
     console.log(`~ ${c.name.padEnd(16)} rate limited — the function reported it instead of caching a wall`);

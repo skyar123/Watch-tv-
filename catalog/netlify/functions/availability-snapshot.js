@@ -20,22 +20,22 @@ const TMDB = 'https://api.themoviedb.org/3';
 
 const names = list => (list || []).map(p => p.provider_name).sort();
 
-export const handler = async (event) => {
+export default async (req) => {
   const key = process.env.TMDB_API_KEY;
   if (!key) {
     return json(503, { error: 'tmdb_key_missing',
       message: 'Cannot snapshot availability without TMDB_API_KEY.' });
   }
 
-  const store = getStore('availability');
+  const store = getStore({ name: 'availability', consistency: 'strong' });
   const watchRaw = await store.get('watchlist', { type: 'json' }).catch(() => null);
   const watchlist = Array.isArray(watchRaw?.shows) ? watchRaw.shows : [];
 
   // A POST replaces the watchlist. The phone pushes its saved shows here so the
   // job knows what to watch; without that this function has nothing to do.
-  if (event.httpMethod === 'POST') {
+  if (req.method === 'POST') {
     let body;
-    try { body = JSON.parse(event.body || '{}'); }
+    try { body = await req.json(); }
     catch { return json(400, { error: 'bad_json' }); }
     const shows = (body.shows || [])
       .filter(s => Number.isFinite(s.tmdbId) && typeof s.name === 'string')
@@ -95,8 +95,12 @@ export const handler = async (event) => {
   return json(200, { ok: true, checked, failed, changed: changes.length, changes });
 };
 
-const json = (statusCode, body) => ({
-  statusCode,
-  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  body: JSON.stringify(body),
-});
+const json = (status, body) =>
+  Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
+
+// v2 scheduled function. v1's handler signature does not receive the Blobs
+// context this depends on.
+// A scheduled function may not also declare a custom `path` — Netlify rejects
+// the combination at build time. It stays reachable at its default
+// /.netlify/functions/ URL for the manual POST that seeds the watchlist.
+export const config = { schedule: '0 9 * * *' };

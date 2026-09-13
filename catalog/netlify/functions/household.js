@@ -16,6 +16,15 @@
  */
 import { getStore } from '@netlify/blobs';
 
+/**
+ * Strong consistency is not optional here. Blobs reads are eventually
+ * consistent by default, and this function's whole job is read-modify-write:
+ * pull the household, merge one profile in, write it back. With eventual
+ * reads the pull came back empty every time, so each phone's push silently
+ * replaced the other's instead of merging, and a stale write beat a fresh one.
+ * It looked like it worked — every response was a 200.
+ */
+
 const CODE_RE = /^[a-z0-9]{6,24}$/;
 
 const json = (statusCode, body) => ({
@@ -43,32 +52,44 @@ function cleanProfile(p) {
   };
 }
 
-export const handler = async (event) => {
+/**
+ * Netlify Functions v2. v1's `export const handler` does not receive the Blobs
+ * context, so getStore() threw and sync was dead on the live deploy while
+ * working nowhere to reveal it — the only symptom was Together being unable to
+ * see the other phone.
+ */
+export default async (req) => {
   let store;
-  try { store = getStore('households'); }
-  catch {
-    return json(503, { error: 'blobs_unavailable',
+  try { store = getStore({ name: 'households', consistency: 'strong' }); }
+  catch (e) {
+    return Response.json({
+      error: 'blobs_unavailable',
+      // Say what actually went wrong. The previous version swallowed this and
+      // left "not available on this deploy" as the only clue.
+      detail: String(e?.message || e).slice(0, 200),
       message: 'Sync needs Netlify Blobs, which is not available on this deploy. ' +
-               'Each phone still works on its own; only Together needs sync.' });
+               'Each phone still works on its own; only Together needs sync.',
+    }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
 
-  const p = event.queryStringParameters || {};
-  const code = String(p.code || '').trim().toLowerCase();
+  const code = String(new URL(req.url).searchParams.get('code') || '').trim().toLowerCase();
   if (!CODE_RE.test(code)) {
-    return json(400, { error: 'bad_code', message: 'A household code is 6–24 letters and digits.' });
+    return Response.json({ error: 'bad_code', message: 'A household code is 6-24 letters and digits.' },
+      { status: 400, headers: { 'Cache-Control': 'no-store' } });
   }
 
-  if (event.httpMethod === 'GET') {
+  if (req.method === 'GET') {
     const doc = await store.get(code, { type: 'json' }).catch(() => null);
-    return json(200, doc || { profiles: {}, updatedAt: 0, empty: true });
+    return Response.json(doc || { profiles: {}, updatedAt: 0, empty: true },
+      { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  if (event.httpMethod === 'POST') {
+  if (req.method === 'POST') {
     let body;
-    try { body = JSON.parse(event.body || '{}'); }
-    catch { return json(400, { error: 'bad_json' }); }
+    try { body = await req.json(); }
+    catch { return Response.json({ error: 'bad_json' }, { status: 400 }); }
 
-    const incoming = body.profiles || {};
+    const incoming = body?.profiles || {};
     const doc = (await store.get(code, { type: 'json' }).catch(() => null)) || { profiles: {} };
 
     const merged = { ...doc.profiles };
@@ -89,8 +110,10 @@ export const handler = async (event) => {
     await store.setJSON(code, next);
     // Hand back the merged state so the caller can adopt anything newer than
     // what it sent, in one round trip.
-    return json(200, { ...next, applied });
+    return Response.json({ ...next, applied }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  return json(405, { error: 'method_not_allowed' });
+  return Response.json({ error: 'method_not_allowed' }, { status: 405 });
 };
+
+export const config = { path: '/api/household' };
