@@ -12,11 +12,15 @@ import { useEffect, useRef, useState, useCallback } from 'react';
  *  • A downward drag should only dismiss when the content is already scrolled
  *    to the top. Otherwise every attempt to scroll up throws the sheet away.
  */
+/** How far down you have to pull before letting go actually dismisses. */
+const DISMISS_PX = 110;
+
 export default function Sheet({ open, onClose, children, title, peek = 0.92 }) {
-  const [dragY, setDragY] = useState(0);
+  const [dragYState, setDragYState] = useState(0);
   const [dragging, setDragging] = useState(false);
   const scrollRef = useRef(null);
   const start = useRef(null);
+  const dragY = useRef(0);
 
   // Lock the page behind the sheet without losing the scroll position.
   useEffect(() => {
@@ -31,7 +35,7 @@ export default function Sheet({ open, onClose, children, title, peek = 0.92 }) {
     };
   }, [open]);
 
-  useEffect(() => { if (open) setDragY(0); }, [open]);
+  useEffect(() => { if (open) { dragY.current = 0; setDragYState(0); } }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -44,6 +48,9 @@ export default function Sheet({ open, onClose, children, title, peek = 0.92 }) {
     // Only start a dismiss-drag from the top of the scroll pane.
     const atTop = (scrollRef.current?.scrollTop ?? 0) <= 0;
     start.current = { y: e.clientY, atTop, id: e.pointerId };
+    // Without capture the drag dies the moment the finger leaves the handle,
+    // which on a 40px-tall grab area is almost immediately.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     setDragging(true);
   }, []);
 
@@ -51,20 +58,36 @@ export default function Sheet({ open, onClose, children, title, peek = 0.92 }) {
     const s = start.current;
     if (!s || s.id !== e.pointerId) return;
     const dy = e.clientY - s.y;
-    if (dy <= 0) { setDragY(0); return; }
+    if (dy <= 0) { dragY.current = 0; setDragYState(0); return; }
     const atTop = s.atTop || (scrollRef.current?.scrollTop ?? 0) <= 0;
     if (!atTop) return;
     // Resistance, so it feels attached rather than loose.
-    setDragY(dy < 0 ? 0 : dy ** 0.92);
+    const v = dy ** 0.92;
+    dragY.current = v;          // the ref is what pointerup reads
+    setDragYState(v);
   }, []);
 
-  const onPointerUp = useCallback(() => {
+  const onPointerUp = useCallback(e => {
+    const s = start.current;
+    e?.currentTarget?.releasePointerCapture?.(s?.id ?? e.pointerId);
     setDragging(false);
     start.current = null;
-    setDragY(y => {
-      if (y > 110) { onClose?.(); return 0; }
-      return 0;
-    });
+    // Read the distance from the ref, not from a setState updater. Calling
+    // onClose() inside an updater is a side effect in the render phase: React
+    // may skip it or run it twice, and the sheet simply never closed.
+    const travelled = dragY.current;
+    dragY.current = 0;
+    setDragYState(0);
+    if (travelled > DISMISS_PX) {
+      // The browser dispatches a click after pointerup. By the time it fires
+      // the sheet has unmounted, so it lands on whatever is underneath — which
+      // on the feed is the card's own open-details button, and the sheet you
+      // just threw away immediately comes back. Swallow that one click.
+      const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 400);
+      onClose?.();
+    }
   }, [onClose]);
 
   if (!open) return null;
@@ -73,7 +96,7 @@ export default function Sheet({ open, onClose, children, title, peek = 0.92 }) {
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
       <button
         className="absolute inset-0 bg-black/60 backdrop-blur-[2px] animate-fade-in"
-        style={{ opacity: Math.max(0, 1 - dragY / 320) }}
+        style={{ opacity: Math.max(0, 1 - dragYState / 320) }}
         onClick={onClose}
         aria-label="Close"
       />
@@ -82,7 +105,7 @@ export default function Sheet({ open, onClose, children, title, peek = 0.92 }) {
                    border-t border-white/10 bg-ink-900 shadow-[0_-20px_60px_rgba(0,0,0,.6)]"
         style={{
           height: `calc(var(--screen) * ${peek})`,
-          transform: `translateY(${dragY}px)`,
+          transform: `translateY(${dragYState}px)`,
           transition: dragging ? 'none' : 'transform .28s cubic-bezier(.2,.9,.3,1)',
         }}
       >

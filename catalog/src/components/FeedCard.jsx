@@ -68,7 +68,7 @@ function FeedCard({
 
       {/* Right-hand action rail. Down at thumb height, 44pt each, never
           stacked tightly over the face of the artwork. */}
-      <div className="absolute right-3 z-20 flex flex-col items-center gap-2"
+      <div className="absolute right-3 z-30 flex flex-col items-center gap-2"
            style={{ bottom: 'calc(env(safe-area-inset-bottom) + 8.5rem)' }}>
         <RailButton
           onClick={() => onSave(show)}
@@ -85,7 +85,10 @@ function FeedCard({
         </RailButton>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 z-20 px-safe pb-safe">
+      {/* Full-width and the same height as the text it holds, so it sits over
+          the action rail's lower buttons. It must not eat their taps: nothing
+          in here is interactive, so it stays transparent to the pointer. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-safe pb-safe">
         <div className="mb-[4.75rem] mr-16 animate-rise">
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <StatusBadge show={show} tmdbExtra={enriched?.extra} ending={enriched?.ending} />
