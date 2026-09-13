@@ -21,7 +21,10 @@ mkdirSync(OUT, { recursive: true });
 const iPhone = {
   ...devices['iPhone 13 Pro'],
   viewport: { width: 393, height: 852 },
-  deviceScaleFactor: 3,
+  // DPR 3 is the real device. The committed set uses SHOT_DPR=1 so the README
+  // images stay a sane size; layout and tap-target maths are in CSS pixels and
+  // identical either way.
+  deviceScaleFactor: Number(process.env.SHOT_DPR || 3),
   hasTouch: true,
   isMobile: true,
 };
@@ -105,11 +108,21 @@ console.log('→ tonight');
 await page.locator('nav button', { hasText: 'Tonight' }).click();
 await page.waitForTimeout(400);
 await page.locator('button', { hasText: 'A good story' }).first().click();
-await shot('06-tonight', 1200);
+await shot('06-tonight', 1500);
+
+// The mood that leans hardest on hand-curation. If this one is empty the
+// curation never reached the pool.
+await page.locator('button', { hasText: 'Queer stories' }).first().click();
+await shot('06b-tonight-queer', 1500);
 
 console.log('→ mine');
 await page.locator('nav button', { hasText: 'Mine' }).click();
 await shot('07-mine', 1200);
+
+console.log('→ news');
+await page.locator('nav button', { hasText: 'News' }).click();
+await page.waitForTimeout(400);
+await shot('09-news', 6000);
 
 console.log('→ search');
 await page.locator('nav button', { hasText: 'Search' }).click();

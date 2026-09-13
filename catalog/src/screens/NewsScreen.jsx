@@ -69,7 +69,11 @@ export default function NewsScreen() {
              className="flex gap-3 rounded-2xl border border-white/10 bg-white/[.03] p-2.5
                         transition active:scale-[.99] active:bg-white/[.06]">
             {item.image && (
+              // Feed images are hotlinked from each publisher and a fair number
+              // 404 or block referrers. Collapse the slot rather than leaving a
+              // grey hole next to the headline.
               <img src={item.image} alt="" loading="lazy"
+                   onError={e => { e.currentTarget.style.display = 'none'; }}
                    className="h-[68px] w-[68px] shrink-0 rounded-lg object-cover no-drag" />
             )}
             <div className="min-w-0 flex-1">

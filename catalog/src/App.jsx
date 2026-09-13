@@ -9,6 +9,7 @@ import NewsScreen from './screens/NewsScreen.jsx';
 import SearchScreen from './screens/SearchScreen.jsx';
 import SettingsScreen from './screens/SettingsScreen.jsx';
 import { fetchIndexPage, fetchShow } from './lib/tvmaze.js';
+import { REPRESENTATION, ENDINGS, CONTENT } from './data/curated.js';
 import { refresh } from './lib/api.js';
 import { useStore, providerChanges } from './lib/store.js';
 
@@ -39,6 +40,20 @@ export default function App() {
         .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || (b.rating ?? 0) - (a.rating ?? 0));
       setPool(ranked);
       setPoolMeta(meta);
+
+      // Every hand-checked show, pulled in by id. Page 0 of the catalogue is
+      // ordered by id, so none of the representation entries are in it — and a
+      // "queer stories" mood that cannot reach Pose or Heartstopper is a
+      // decoration. These are the shows the curation exists for.
+      const curatedIds = [...new Set([
+        ...Object.keys(REPRESENTATION), ...Object.keys(ENDINGS), ...Object.keys(CONTENT),
+      ])].map(Number);
+      const extra = (await Promise.all(curatedIds.map(id =>
+        fetchShow(id).then(r => r.show).catch(() => null)))).filter(Boolean);
+      setPool(prev => {
+        const have = new Set(prev.map(s => s.key));
+        return [...prev, ...extra.filter(s => !have.has(s.key))];
+      });
     } catch {
       setPool([]);
     } finally {

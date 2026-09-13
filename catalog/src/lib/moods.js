@@ -39,11 +39,20 @@ export const MOODS = [
     test(show) {
       if (show.status.key !== 'ended') return null;         // a complete story, start to end
       if (!(show.rating >= 7.5)) return null;
+      // Episode counts only exist once a show has been looked up individually,
+      // and the catalogue index does not carry them. Say the extra sentence
+      // when we have it rather than refusing to pick anything without it.
       const t = totalTime(show);
-      if (!t) return null;
-      return { score: show.rating + (t.hours > 20 ? 0.5 : 0),
-               reason: `Finished in ${t.episodes} episodes, rated ${show.rating.toFixed(1)}, ` +
-                       `so the whole thing exists and it lands.` };
+      const years = show.premiered && show.ended
+        ? `${show.premiered.slice(0, 4)}–${show.ended.slice(0, 4)}` : null;
+      return {
+        score: show.rating + (t && t.hours > 20 ? 0.5 : 0),
+        reason: t
+          ? `Finished in ${t.episodes} episodes, rated ${show.rating.toFixed(1)}, ` +
+            `so the whole thing exists and it lands.`
+          : `Finished${years ? ` (${years})` : ''} and rated ${show.rating.toFixed(1)} — ` +
+            `a complete story, not one that stops mid-sentence.`,
+      };
     },
   },
   {
@@ -82,7 +91,9 @@ export const MOODS = [
     test(show) {
       if (!has(show, 'Nature', 'Travel', 'Food', 'History', 'Science-Fiction', 'Fantasy')
           && show.type !== 'Documentary') return null;
-      if (!show.backdrop) return null;    // it has to actually have artwork to be about looking
+      // It has to actually have artwork to be a pick about looking at things.
+      // The catalogue index carries a poster but no backdrop, so accept either.
+      if (!show.backdrop && !show.poster) return null;
       const why = show.type === 'Documentary' || has(show, 'Nature', 'Travel')
         ? `A ${(show.type === 'Documentary' ? 'documentary' : (show.genres || [])[0] || 'travel').toLowerCase()} series — made to be looked at.`
         : `${(show.genres || []).filter(g => ['Science-Fiction', 'Fantasy', 'History'].includes(g)).join(' and ')}, so it is built rather than filmed.`;

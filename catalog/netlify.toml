@@ -33,3 +33,9 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# The nightly availability snapshot. This is what lets the app warn you that
+# something you saved is leaving a service even when you have not opened it.
+# Needs TMDB_API_KEY and the Netlify Blobs store; it no-ops safely without them.
+[functions."availability-snapshot"]
+  schedule = "0 9 * * *"

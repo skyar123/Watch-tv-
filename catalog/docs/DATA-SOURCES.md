@@ -1,0 +1,132 @@
+# What the data actually contains
+
+Written after calling every endpoint, not before. Reproduce all of it with:
+
+```bash
+npm run verify            # TVmaze + RSS, no keys needed
+TMDB_API_KEY=xxx npm run verify:tmdb
+node scripts/check-curated.mjs
+```
+
+## Three features had to change because the data does not exist
+
+### 1. There is no "Cancelled" status
+
+The plan was Running / Ended / Cancelled. TVmaze's status vocabulary is
+`Running`, `Ended`, `To Be Determined`, `In Development`. That is the whole
+list. Checked against two famously cancelled shows:
+
+```
+1899   status='Ended'  ended='2022-11-17'
+GLOW   status='Ended'  ended='2019-08-09'
+```
+
+Across 240 shows on page 0: `{Ended: 219, Running: 20, To Be Determined: 1}`.
+
+**What the app does instead.** TVmaze supplies Running/Ended. TMDB does
+distinguish `Canceled`, so the badge upgrades when a TMDB key is present, and
+when it is not the detail sheet says so out loud rather than showing "Ended"
+as if that settled it.
+
+### 2. Nothing knows whether a show ends on a cliffhanger
+
+No endpoint has a field for it. Not TVmaze, not TMDB.
+
+**What the app does instead.** Three tiers, and the tier is always visible:
+
+| Tier | Source | Shown as |
+|---|---|---|
+| `checked` | `src/data/curated.js`, written by hand with a date | "Unresolved ending" plus the note |
+| `inferred` | Episode-rating shape, e.g. a finale far below the show's average | "Ending may not land" plus the arithmetic |
+| `unknown` | Nothing to go on | "Nothing in the data says how this one ends" |
+
+The inference is real but shallow, and it says so. On Game of Thrones it fires
+correctly: *"the finale rates 5.3 against an 8.0 average"*. On Loki it fires the
+other way: *"the finale rates 8.7 against an 8.1 average, which usually means it
+landed"*.
+
+### 3. There are no content descriptors anywhere
+
+TMDB's `/tv/{id}/content_ratings` returns a certificate string and nothing else.
+There is no gore, cruelty or peril field in TMDB or TVmaze. So kid-friendliness
+judged on content — the thing actually worth knowing — cannot be derived.
+
+**What the app does instead.** Hand-checked entries in `curated.js` carry what
+is on screen and what was checked for and not found. Everything else reads
+**"Not checked"**, never a green tick. A genre-only signal is labelled
+`genre-only` and explicitly says a label is not a look at the show.
+
+The same reasoning applies to representation: TMDB keywords include `lgbt`, but
+a keyword cannot tell you whether a queer character is a lead or walks through
+one scene. Those tags are hand-written with a note explaining why each show
+qualifies, and the counts are shown honestly in Settings.
+
+## What turned out better than planned
+
+### Per-episode ratings and runtimes exist, free, no key
+
+```
+GET /shows/44933/episodes  →  19/19 episodes carry rating.average
+                              19/19 carry runtime; summed = 927 min = 15.4 h
+```
+
+So **total hours is an exact sum**, not `episodes × average`. Verified:
+Westworld 38 h, Game of Thrones 75 h, Breaking Bad 62 h. When some episodes
+lack a runtime the app says `approx` and shows the arithmetic it used.
+
+### But the rating spread is narrow, which breaks naive sparklines
+
+Real spread on Severance is **7.0–8.5** on a 0–10 axis. Drawn against 0–10,
+every show in the catalogue is a flat line and the sparkline is decoration.
+Sparklines are therefore normalised against each show's own min/max, and the
+real range is printed beside them so the scale cannot mislead.
+
+### TVmaze serves landscape backdrops
+
+`/shows/{id}/images` returns `background` entries up to 3840×2160 — 10/10 on a
+sample of well-known shows. The feed is full-bleed with **no TMDB key at all**.
+
+### One request instead of three
+
+`?embed[]=episodes&embed[]=images` works, so a show costs one round trip.
+
+### Two schedule endpoints with different shapes
+
+```
+/schedule?country=US&date=      → 54 rows, show under  .show
+/schedule/web?date=&country=US  →  4 rows, show under  ._embedded.show
+```
+
+Confusing these silently yields undefined show names.
+
+## TMDB
+
+Reachable, and returns `401 Invalid API key` without one, so the wiring is
+proven even though the shapes are not. **No feature in this app claims TMDB
+data until `npm run verify:tmdb` passes on a real key.** Without the key the
+app runs on TVmaze alone and labels every gap:
+
+| Missing | Shown as |
+|---|---|
+| Trailer | "No trailer — TMDB key not set on this deploy" |
+| Providers | "No provider data" |
+| Cancelled status | "cancellation can only be confirmed from TMDB, which is unavailable on this deploy" |
+
+## RSS
+
+13 feeds, each fetched and confirmed to return real `<item>` elements.
+Seven are queer publications, deliberately.
+
+| Source | Tag |
+|---|---|
+| Them, Autostraddle, Xtra Magazine, LGBTQ Nation, PinkNews, The Advocate, Out | queer |
+| Variety, THR, TVLine, Deadline, AV Club, Polygon | tv |
+
+Tried and dropped after failing: **Vulture** (404) and **IndieWire's TV feed**
+(200 but zero items).
+
+Them and Polygon sit behind Cloudflare and intermittently 403 a datacentre IP
+regardless of User-Agent — observed returning 200, then 403 minutes later. They
+stay in the list, and the news function reports per-source status so an outlet
+that drops out is visible as "unreachable" rather than looking like a slow news
+day.
