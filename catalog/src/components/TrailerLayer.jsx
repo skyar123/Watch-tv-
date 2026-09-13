@@ -128,7 +128,10 @@ export default function TrailerLayer({ videoKey, active, muted, onToggleMute, on
         <button
           type="button"
           onClick={e => { e.stopPropagation(); onToggleMute?.(); }}
-          className="tap absolute right-3 rounded-full glass border border-white/15
+          // z-30 puts this above the card's full-bleed "open details" overlay
+          // (z-10). Without it the mute toggle is painted under that button and
+          // simply cannot be tapped.
+          className="tap absolute right-3 z-30 rounded-full glass border border-white/15
                      text-white/90 active:scale-95 transition"
           style={{ top: 'calc(env(safe-area-inset-top) + 3.75rem)' }}
           aria-label={muted ? 'Unmute trailer' : 'Mute trailer'}

@@ -14,7 +14,7 @@
 import { handler as newsHandler } from '../netlify/functions/news.js';
 
 export async function installLiveApiShim(page, { tmdbKey = process.env.TMDB_API_KEY } = {}) {
-  const stats = { tvmaze: 0, images: 0, news: 0, tmdb: 0, failed: 0 };
+  const stats = { tvmaze: 0, images: 0, news: 0, tmdb: 0, trailers: 0, failed: 0 };
 
   await page.route('**://api.tvmaze.com/**', async route => {
     try {
@@ -59,6 +59,14 @@ export async function installLiveApiShim(page, { tmdbKey = process.env.TMDB_API_
       queryStringParameters: Object.fromEntries(url.searchParams),
     });
     stats.news++;
+    await route.fulfill({ status: res.statusCode, contentType: 'application/json', body: res.body });
+  });
+
+  await page.route('**/api/trailer**', async route => {
+    const { handler } = await import('../netlify/functions/trailer.js');
+    const url = new URL(route.request().url());
+    const res = await handler({ queryStringParameters: Object.fromEntries(url.searchParams) });
+    stats.trailers++;
     await route.fulfill({ status: res.statusCode, contentType: 'application/json', body: res.body });
   });
 

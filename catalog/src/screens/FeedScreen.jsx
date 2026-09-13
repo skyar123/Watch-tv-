@@ -84,6 +84,38 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
         const curated = getEnding(show.tvmazeId);
         const base = {};
 
+        // Start the trailer FIRST and do not await it yet. It is the thing the
+        // feed is for, it depends on nothing else, and behind the episode and
+        // TMDB lookups it took long enough that the first card stayed a still
+        // image for several seconds. /api/trailer falls back to a scored
+        // YouTube search, so this works with no TMDB key at all.
+        const trailerP = fetchTrailer({
+          name: show.name, premiered: show.premiered, key: show.key,
+        });
+
+        // Show it the moment it lands, rather than waiting for the rest of the
+        // enrichment to finish.
+        trailerP.then(t => {
+          if (cancelled) return;
+          setEnrichment(p => ({ ...p, [show.key]: {
+            ...(p[show.key] || {}),
+            // trailerDone separates "still looking" from "looked and found
+            // nothing". Without it a card whose lookup failed sat on
+            // "Finding a trailer…" for ever, which is a lie about a finished
+            // request.
+            trailerDone: true,
+            trailerKey: t.key || null,
+            trailerReason: t.key ? null : (t.reason || 'no_trailer_found'),
+            trailerSource: t.source, trailerConfidence: t.confidence,
+            trailerTitle: t.title, trailerChannel: t.channel,
+          } }));
+        }).catch(() => {
+          if (cancelled) return;
+          setEnrichment(p => ({ ...p, [show.key]: {
+            ...(p[show.key] || {}), trailerDone: true, trailerReason: 'trailer_unreachable',
+          } }));
+        });
+
         // The /shows index carries no episodes, so the headline number this app
         // exists for — total hours — is missing until we ask for them. Lazily,
         // for the card in view and the next two only.
@@ -101,9 +133,17 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
         if (cancelled) return;
         if (!match || match.unavailable) {
           const reason = match?.unavailable || 'no_tmdb_match';
+          const t = await trailerP;
+          if (cancelled) return;
           setEnrichment(p => ({ ...p, [show.key]: {
+            ...(p[show.key] || {}),
             ...base,
-            trailerReason: reason,
+            trailerKey: t.key,
+            trailerReason: t.key ? null : (t.reason || reason),
+            trailerSource: t.source,
+            trailerConfidence: t.confidence,
+            trailerTitle: t.title,
+            trailerChannel: t.channel,
             // Carry the reason into providers too, so the card can say WHY
             // availability is unknown rather than just that it is.
             providers: { available: false, reason },
@@ -112,7 +152,7 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
         }
 
         const [trailer, providers, extra] = await Promise.all([
-          fetchTrailer(match.id), fetchProviders(match.id), fetchShowExtra(match.id),
+          trailerP, fetchProviders(match.id), fetchShowExtra(match.id),
         ]);
         if (cancelled) return;
 
@@ -124,11 +164,16 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
         setEnrichment(p => ({
           ...p,
           [show.key]: {
+            ...(p[show.key] || {}),
             ...base,
             tmdbId: match.id,
             matchConfidence: match.confidence,
-            trailerKey: trailer.available ? trailer.key : null,
-            trailerReason: trailer.available ? trailer.reason : trailer.reason,
+            trailerKey: trailer.key,
+            trailerReason: trailer.key ? null : trailer.reason,
+            trailerSource: trailer.source,
+            trailerConfidence: trailer.confidence,
+            trailerTitle: trailer.title,
+            trailerChannel: trailer.channel,
             providers,
             extra,
             backdrop: extra.available ? extra.backdrop : backdropUrl(match.backdrop_path),

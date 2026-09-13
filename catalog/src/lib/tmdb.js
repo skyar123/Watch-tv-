@@ -67,19 +67,37 @@ export async function resolveId({ imdbId, name, premiered }) {
 }
 
 /**
- * The trailer for the feed. Preference order matters: an official Trailer beats
- * a Teaser beats a random Clip, and we only ever take YouTube because that is
- * where playback is licensed to happen.
+ * The trailer for the feed.
+ *
+ * This goes to /api/trailer rather than straight to TMDB, because the feed has
+ * to have trailers whether or not a TMDB key is configured. That function tries
+ * TMDB first and falls back to a scored YouTube search, and it tells us which
+ * one answered and how confident it is — a searched match is a good guess, not
+ * a fact, and the card says so.
  */
-export async function fetchTrailer(tmdbId) {
-  const r = await call('videos', { id: tmdbId });
-  if (!r.available) return { available: false, reason: r.reason };
-  const yt = (r.data?.results || []).filter(v => v.site === 'YouTube' && v.key);
-  if (!yt.length) return { available: true, key: null, reason: 'no_youtube_video' };
-  const rank = v => (v.type === 'Trailer' ? 0 : v.type === 'Teaser' ? 1 : v.type === 'Opening Credits' ? 2 : 3)
-                  + (v.official ? 0 : 0.5);
-  yt.sort((a, b) => rank(a) - rank(b));
-  return { available: true, key: yt[0].key, type: yt[0].type, official: yt[0].official, meta: r.meta };
+export async function fetchTrailer({ name, premiered, tmdbId, key }) {
+  const qs = new URLSearchParams({ name });
+  if (premiered) qs.set('year', premiered.slice(0, 4));
+  if (tmdbId) qs.set('tmdbId', String(tmdbId));
+  if (key) qs.set('key', key);
+  try {
+    const { data, meta } = await getJSON(`/api/trailer?${qs}`);
+    return {
+      available: true,
+      key: data.key || null,
+      reason: data.reason || null,
+      source: data.source || null,          // 'tmdb' | 'youtube-search'
+      confidence: data.confidence || null,  // 'exact' | 'high' | 'likely' | 'low'
+      title: data.title || null,
+      channel: data.channel || null,
+      why: data.why || [],
+      cached: Boolean(data.cached),
+      ageMs: data.ageMs ?? null,
+      meta,
+    };
+  } catch (e) {
+    return { available: false, key: null, reason: e.code || 'trailer_unreachable' };
+  }
 }
 
 /** Per-country streaming availability. Powered by JustWatch; attribution required. */

@@ -117,11 +117,31 @@ function FeedCard({
           {!trailerKey && active && (
             <p className="mt-2">
               <Unknown>
-                {{
-                  tmdb_key_missing: 'No trailer — TMDB key not set on this deploy',
-                  no_youtube_video: 'No trailer on TMDB for this one',
-                  no_tmdb_match: 'No trailer — could not match this show on TMDB',
-                }[enriched?.trailerReason] ?? 'Looking for a trailer…'}
+                {!enriched?.trailerDone
+                  ? 'Finding a trailer…'
+                  : ({
+                      no_trailer_found: 'No trailer found for this one',
+                      youtube_rate_limited: 'Trailer lookups are rate limited right now — pull to refresh shortly',
+                      trailer_unreachable: 'Could not reach the trailer service',
+                      tmdb_key_missing: 'No trailer — TMDB key not set on this deploy',
+                      no_youtube_video: 'No trailer on TMDB for this one',
+                      no_tmdb_match: 'No trailer — could not match this show',
+                      // An unmapped reason must still read as finished, not as
+                      // work in progress.
+                    }[enriched.trailerReason] ?? `No trailer (${enriched.trailerReason || 'unknown reason'})`)}
+              </Unknown>
+            </p>
+          )}
+
+          {/* A searched trailer is a good guess, not a fact. TMDB's is a fact.
+              Say which, so a wrong video is recognisable as a wrong guess
+              rather than looking like the show. */}
+          {trailerKey && active && enriched?.trailerSource === 'youtube-search' &&
+           enriched.trailerConfidence !== 'high' && (
+            <p className="mt-2">
+              <Unknown>
+                Trailer matched by search — “{enriched.trailerTitle}”
+                {enriched.trailerChannel ? ` from ${enriched.trailerChannel}` : ''}
               </Unknown>
             </p>
           )}
