@@ -29,6 +29,14 @@
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
+# Netlify guesses application/octet-stream for .webmanifest. Safari is lenient
+# about it but Chrome logs a manifest error and some installers refuse it.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
+    Cache-Control = "public, max-age=3600"
+
 [[headers]]
   for = "/assets/*"
   [headers.values]
