@@ -17,6 +17,10 @@ export default function TonightScreen({ pool, ranked, taste, onOpen, household }
   const state = useStore();
   const [mood, setMood] = useState(null);
   const [nonce, setNonce] = useState(0);
+  // The narrow reading of a representation tag is ~32 shows and the broad one
+  // ~690. Neither is right for everyone, so it is a switch rather than a
+  // threshold someone picked.
+  const [wide, setWide] = useState(false);
 
   const ctx = useMemo(() => ({
     saved: state.saved,
@@ -24,10 +28,11 @@ export default function TonightScreen({ pool, ranked, taste, onOpen, household }
     seen: state.seen,
     hideUnavailable: state.hideUnavailable,
     watchedByShow: key => watchedSet(state, key),
+    wideRepresentation: wide,
     // Providers are only known for shows the feed has already enriched, so this
     // is a bonus when we have it rather than a filter we pretend to apply.
     availabilityFor: () => ({ known: false, onMine: [] }),
-  }), [state]);
+  }), [state, wide]);
 
   /**
    * Rank position from the taste model, so a mood's picks come out in the
@@ -54,7 +59,7 @@ export default function TonightScreen({ pool, ranked, taste, onOpen, household }
     const top = all.slice(0, 12);
     const start = (nonce * 3) % Math.max(1, top.length);
     return [...top.slice(start), ...top.slice(0, start)].slice(0, 3);
-  }, [mood, pool, ctx, nonce]);
+  }, [mood, pool, ranked, ctx, nonce, tasteRank]);
 
   const moodDef = MOODS.find(m => m.id === mood);
 
@@ -124,6 +129,28 @@ export default function TonightScreen({ pool, ranked, taste, onOpen, household }
               </button>
             )}
           </div>
+
+          {/* Two readings of the same tag, and the difference is large enough
+              that hiding it behind a threshold would be a lie by omission. */}
+          {moodDef.widens && (
+            <div className="mb-2.5 rounded-xl border border-white/10 bg-white/[.03] p-2.5">
+              <label className="flex items-start gap-2.5" style={{ minHeight: 44 }}>
+                <input type="checkbox" checked={wide} onChange={e => setWide(e.target.checked)}
+                       className="mt-0.5 h-5 w-5 shrink-0 accent-mint" />
+                <span className="text-[12px] leading-snug text-haze-200">
+                  Include shows that merely <em>have</em> {moodDef.widens === 'queer'
+                    ? 'queer characters' : 'disabled characters'}
+                  <span className="block text-[11px] text-haze-400">
+                    {wide
+                      ? 'Showing the broad tag too — it covers a central storyline and one ' +
+                        'recurring character equally.'
+                      : 'Currently showing only shows that are ABOUT this. Widening adds many ' +
+                        'more, of much more mixed relevance.'}
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
 
           {picks.length === 0 && (
             <div className="rounded-xl border border-white/10 bg-white/[.03] p-4">

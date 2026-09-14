@@ -64,38 +64,41 @@ export const MOODS = [
      * The first version used only the former, six shows existed, and the
      * filter returned one result — which is not honesty, it is a dead end.
      */
-    test(show) {
-      const rep = getRepresentation(show.tvmazeId);
+    test(show, ctx) {
+      const rep = getRepresentation(show.tvmazeId, { wide: ctx?.wideRepresentation });
       if (!rep?.queer) return null;
-      const checked = rep.queer.tier === 'checked';
+      const t = rep.queer.tier;
       return {
-        score: (checked ? 12 : 8) + (show.rating || 0),
-        reason: checked
-          ? rep.queer.why
-          : `Listed under ${(rep.queer.cats || ['LGBTQ television'])[0]} on Wikipedia.`,
-        tier: rep.queer.tier,
+        // Ordered by strength of claim, so a hand-checked show beats a
+        // subject match beats a genre tag every time.
+        score: (t === 'checked' ? 14 : t === 'about' ? 10 : 6) + (show.rating || 0),
+        reason: t === 'checked' ? rep.queer.why
+              : t === 'about' ? `A show about ${rep.queer.subject || 'queer life'}.`
+              : `Has queer characters or storylines — a broad tag, not a promise.`,
+        tier: t,
       };
     },
-    emptyNote: 'Nothing here yet. This draws on Wikipedia\'s LGBTQ television categories ' +
-               'plus shows checked by hand; if it is empty the index has not loaded.',
+    emptyNote: 'Nothing here yet — the representation index may not have loaded.',
+    /** Which tag this mood widens, so the UI can offer the toggle. */
+    widens: 'queer',
   },
   {
     id: 'disability', label: 'Disability stories', emoji: '♿',
     blurb: 'Disabled characters and lives, not props',
-    test(show) {
-      const rep = getRepresentation(show.tvmazeId);
+    test(show, ctx) {
+      const rep = getRepresentation(show.tvmazeId, { wide: ctx?.wideRepresentation });
       if (!rep?.disability) return null;
-      const checked = rep.disability.tier === 'checked';
+      const t = rep.disability.tier;
       return {
-        score: (checked ? 12 : 8) + (show.rating || 0),
-        reason: checked
-          ? rep.disability.why
-          : `Listed under ${(rep.disability.cats || ['disability in television'])[0]} on Wikipedia.`,
-        tier: rep.disability.tier,
+        score: (t === 'checked' ? 14 : t === 'about' ? 10 : 6) + (show.rating || 0),
+        reason: t === 'checked' ? rep.disability.why
+              : t === 'about' ? `A show about ${rep.disability.subject || 'disability'}.`
+              : `Has disabled characters or storylines — a broad tag, not a promise.`,
+        tier: t,
       };
     },
-    emptyNote: 'Nothing here yet. This draws on Wikipedia\'s disability-in-television ' +
-               'categories plus shows checked by hand; if it is empty the index has not loaded.',
+    emptyNote: 'Nothing here yet — the representation index may not have loaded.',
+    widens: 'disability',
   },
   {
     id: 'people', label: 'With people', emoji: '👯',

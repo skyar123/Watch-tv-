@@ -372,24 +372,39 @@ function Block({ title, icon, children }) {
  * and "Wikipedia files it here" are different claims and the difference is the
  * whole reason both are shown.
  */
+/**
+ * The tier is on the chip, not buried. "A person read this and wrote down why",
+ * "a database says this is what the show is about" and "a genre tag that also
+ * covers one recurring character" are three different claims, and conflating
+ * them is exactly how a representation tag becomes worthless.
+ */
+const TIER_STYLE = {
+  checked:  'border-pop/40 bg-pop/10 text-pop-soft',
+  about:    'border-mint/35 bg-mint/10 text-mint',
+  features: 'border-white/15 bg-white/5 text-haze-200',
+};
+const TIER_LABEL = { checked: 'checked by hand', about: 'about this', features: 'features this' };
+
 function RepRow({ icon, label, entry, checked }) {
-  const hand = entry.tier === 'checked';
   return (
     <div className="mb-2.5 last:mb-0">
-      <span className={`chip border ${hand
-        ? 'border-pop/30 bg-pop/10 text-pop-soft'
-        : 'border-white/15 bg-white/5 text-haze-200'}`}>
-        {icon}{label}{hand ? ` · ${entry.level}` : ' · listed'}
+      <span className={`chip border ${TIER_STYLE[entry.tier] || TIER_STYLE.features}`}>
+        {icon}{label} · {TIER_LABEL[entry.tier] || entry.level}
       </span>
       <p className="mt-1.5 text-[12.5px] leading-snug text-haze-200">{entry.why}</p>
       <p className="mt-0.5 text-[10px] text-haze-400">
-        {hand
+        {entry.tier === 'checked'
           ? `Checked by hand, ${checked}.`
-          : <>From Wikipedia's category tree{entry.wiki ? <>
-              {' · '}<a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(entry.wiki)}`}
-                 target="_blank" rel="noreferrer" className="text-mint">read the article</a>
-            </> : null}
-            {entry.ambiguous && ' · name collision, matched by popularity — worth double-checking'}</>}
+          : <>
+              From {entry.source === 'wikidata' ? 'Wikidata' : 'Wikipedia'}
+              {entry.link && <>
+                {' · '}<a href={entry.link} target="_blank" rel="noreferrer" className="text-mint">
+                  check it
+                </a>
+              </>}
+              {entry.uncertainMatch &&
+                ' · matched on title alone, so it could be a different show of the same name'}
+            </>}
       </p>
     </div>
   );

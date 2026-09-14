@@ -10,7 +10,7 @@
     "verify": "node scripts/verify-sources.mjs",
     "verify:tmdb": "node scripts/verify-sources.mjs --tmdb",
     "shots": "node scripts/shots.mjs",
-    "test": "node scripts/check-curated.mjs && node scripts/test-taste.mjs && node scripts/test-sw.mjs && node scripts/test-trailer.mjs && node scripts/test-interactions.mjs && node scripts/test-swipe.mjs && node scripts/test-trailer-feed.mjs",
+    "test": "node scripts/check-curated.mjs && node scripts/test-representation.mjs && node scripts/test-taste.mjs && node scripts/test-sw.mjs && node scripts/test-trailer.mjs && node scripts/test-interactions.mjs && node scripts/test-swipe.mjs && node scripts/test-teach.mjs && node scripts/test-trailer-feed.mjs",
     "test:sw": "node scripts/test-sw.mjs",
     "test:ui": "node scripts/test-interactions.mjs",
     "check:curated": "node scripts/check-curated.mjs",
@@ -19,7 +19,9 @@
     "bake:dry": "node scripts/bake-catalogue.mjs --dry",
     "test:rank": "node scripts/test-rank.mjs",
     "test:taste": "node scripts/test-taste.mjs",
-    "test:swipe": "node scripts/test-swipe.mjs"
+    "test:swipe": "node scripts/test-swipe.mjs",
+    "bake:rep": "node scripts/bake-representation.mjs",
+    "test:rep": "node scripts/test-representation.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",

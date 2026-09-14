@@ -24,8 +24,19 @@ import { getRepresentation as getCurated } from '../data/curated.js';
 let WIKI = null;      // lazily loaded, id -> { queer?, disability? }
 let meta = null;
 
-export async function loadRepresentation() {
+/**
+ * @param {object} [seed] a pre-parsed index, for Node contexts. Node 22 needs
+ *   an import attribute for JSON modules and Vite does not, so rather than
+ *   write source that only builds in one of them, the tests hand the document
+ *   in directly.
+ */
+export async function loadRepresentation(seed) {
   if (WIKI) return { count: Object.keys(WIKI).length, meta };
+  if (seed) {
+    WIKI = seed.shows || {};
+    meta = { bakedAt: seed.bakedAt, source: seed.source, stats: seed.stats, note: seed.note };
+    return { count: Object.keys(WIKI).length, meta };
+  }
   try {
     const doc = (await import('../data/representation.json')).default;
     WIKI = doc.shows || {};
@@ -43,9 +54,23 @@ export async function loadRepresentation() {
 export const representationMeta = () => meta;
 
 /**
- * @returns {{queer?:{level,why,tier,cats?}, disability?:{...}, checked?:string}|null}
+ * Three tiers, deliberately not collapsed.
+ *
+ *   checked   — a person read it and wrote down why it matters to the plot
+ *   about     — Wikidata records this as the show's main subject, or Wikipedia
+ *               files it under a "shows about X" category. Sense8, Pose,
+ *               Orange Is the New Black, Speechless, The A Word.
+ *   features  — Wikidata's genre tag. Covers a central queer storyline AND one
+ *               recurring character equally: Fingersmith sits beside Scandal.
+ *
+ * Merging "about" into "features" would fill a queer stories filter with
+ * mainstream shows that happen to have a gay best friend, which is its own
+ * kind of erasure. The app defaults to the narrow reading and widening is a
+ * choice the reader makes.
+ *
+ * @returns {{queer?:{tier,level,why,...}, disability?:{...}, checked?:string}|null}
  */
-export function getRepresentation(tvmazeId) {
+export function getRepresentation(tvmazeId, { wide = false } = {}) {
   const curated = getCurated(tvmazeId);
   const wiki = WIKI?.[tvmazeId];
   if (!curated && !wiki) return null;
@@ -54,38 +79,42 @@ export function getRepresentation(tvmazeId) {
   for (const kind of ['queer', 'disability']) {
     if (curated?.[kind]) {
       out[kind] = { ...curated[kind], tier: 'checked' };
-    } else if (wiki?.[kind]) {
-      out[kind] = {
-        tier: 'listed',
-        level: 'listed',
-        cats: wiki[kind].cats,
-        wiki: wiki[kind].wiki,
-        ambiguous: wiki[kind].ambiguous,
-        why: `Wikipedia editors file this under ${listCats(wiki[kind].cats)}. ` +
-             `That means the show is considered related to the subject — it does not ` +
-             `say whether a character is a lead or appears in one scene.`,
-      };
+      continue;
     }
+    const w = wiki?.[kind];
+    if (!w) continue;
+    if (w.tier === 'features' && !wide) continue;   // narrow by default
+    out[kind] = {
+      tier: w.tier,
+      level: w.tier === 'about' ? 'central' : 'present',
+      source: w.source,
+      subject: w.subject,
+      link: w.wikidata
+        ? `https://www.wikidata.org/wiki/${w.wikidata}`
+        : w.wiki ? `https://en.wikipedia.org/wiki/${encodeURIComponent(w.wiki)}` : null,
+      // A name match is a guess; an IMDb id is not. Say which.
+      uncertainMatch: w.match === 'name',
+      why: w.tier === 'about'
+        ? `${w.source === 'wikidata' ? 'Wikidata' : 'Wikipedia'} records this show's subject as ` +
+          `${w.subject || kind}. That is a claim about what the show is about, not about ` +
+          `how large any one character is.`
+        : `Tagged ${w.subject || kind} on Wikidata. That tag covers everything from a central ` +
+          `storyline to one recurring character, so it is a weak signal on its own.`,
+    };
   }
-  return Object.keys(out).length && (out.queer || out.disability) ? out : null;
+  return out.queer || out.disability ? out : null;
 }
 
-const listCats = cats => {
-  const c = (cats || []).slice(0, 2);
-  if (!c.length) return 'this subject';
-  return c.length === 1 ? `“${c[0]}”` : `“${c[0]}” and “${c[1]}”`;
-};
-
 /** Used by the mood filter and the tag search. */
-export const hasQueer = id => Boolean(getRepresentation(id)?.queer);
-export const hasDisability = id => Boolean(getRepresentation(id)?.disability);
+export const hasQueer = (id, o) => Boolean(getRepresentation(id, o)?.queer);
+export const hasDisability = (id, o) => Boolean(getRepresentation(id, o)?.disability);
 
-/** How many shows carry each tag, for the honesty line in the UI. */
+/** How many shows carry each tag, so the UI can say what it is drawing on. */
 export function representationCounts() {
   const wiki = Object.values(WIKI || {});
-  return {
-    queerListed: wiki.filter(s => s.queer).length,
-    disabilityListed: wiki.filter(s => s.disability).length,
-    loaded: WIKI !== null,
-  };
+  const tally = kind => ({
+    about: wiki.filter(s => s[kind]?.tier === 'about').length,
+    features: wiki.filter(s => s[kind]?.tier === 'features').length,
+  });
+  return { queer: tally('queer'), disability: tally('disability'), loaded: WIKI !== null };
 }
