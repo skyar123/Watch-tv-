@@ -16,7 +16,7 @@
  * say how old the thing on screen is. Cached data is fine; cached data that
  * looks live is not.
  */
-const VERSION    = 'v1';
+const VERSION    = 'v2';
 const ASSETS     = `tonight-assets-${VERSION}`;
 const API        = `tonight-api-${VERSION}`;
 const API_TIMEOUT_MS = 3500;   // fall back to cache after this, not never
@@ -115,6 +115,32 @@ async function networkFirst(req) {
   }
 }
 
+const CATALOGUE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
+
+async function catalogueCache(req) {
+  const cache = await caches.open(ASSETS);
+  const hit = await cache.match(req);
+  const at = Number(hit?.headers.get('x-sw-cached-at') || 0);
+  const stale = !at || Date.now() - at > CATALOGUE_MAX_AGE_MS;
+
+  if (hit && !stale) return hit;
+
+  if (hit && stale) {
+    // Serve the old one now, replace it quietly for next time. A day-old
+    // catalogue is a fine thing to look at; a one-megabyte wait is not.
+    fetch(req).then(net => {
+      if (net.ok) cache.put(req, stamp(net, { 'x-sw-cached-at': String(Date.now()) }));
+    }).catch(() => {});
+    return hit;
+  }
+
+  const net = await fetch(req);
+  if (net.ok) {
+    await cache.put(req, stamp(net.clone(), { 'x-sw-cached-at': String(Date.now()) }));
+  }
+  return net;
+}
+
 async function cacheFirst(req) {
   const cache = await caches.open(ASSETS);
   const hit = await cache.match(req);
@@ -144,6 +170,15 @@ self.addEventListener('fetch', e => {
 
   if (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/')) {
     e.respondWith(cacheFirst(request));
+    return;
+  }
+
+  // The baked catalogue is about 1 MB and changes only when it is re-baked.
+  // It is NOT content-hashed, so plain cache-first would pin the app to an old
+  // catalogue for ever; network-first would re-download a megabyte on every
+  // load. Serve from cache, and refresh in the background once a day.
+  if (/^\/catalogue(-core)?\.json$/.test(url.pathname)) {
+    e.respondWith(catalogueCache(request));
     return;
   }
 

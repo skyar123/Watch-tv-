@@ -28,7 +28,7 @@ const check = (name, ok, detail = '') => {
   if (!ok) fails++;
 };
 
-await page.goto(BASE, { waitUntil: 'networkidle', timeout: 45000 });
+await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 45000 });
 await page.waitForSelector('.feed-card', { timeout: 25000 });
 await page.waitForTimeout(4000);
 
@@ -75,7 +75,7 @@ const stored = await countWatched();
 check('watched episodes persisted', stored === 3, `${stored} in localStorage`);
 
 console.log('reload keeps progress');
-await page.reload({ waitUntil: 'networkidle' });
+await page.reload({ waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.feed-card', { timeout: 25000 });
 const stored2 = await countWatched();
 check('progress survives a reload', stored2 === 3, `${stored2} after reload`);

@@ -57,6 +57,10 @@ page.on('console', m => {
   // A 503 from /api/tmdb is the correct response on a deploy with no key, and
   // the screenshots are meant to show that state. Not a failure.
   if (m.type() === 'error' && /status of 503/.test(t)) return;
+  // News thumbnails are hotlinked from each publisher, and this sandbox can
+  // only reach hosts the shim proxies. The app already hides an image that
+  // fails to load, so a reset here says nothing about the app.
+  if (m.type() === 'error' && /ERR_CONNECTION_RESET|ERR_NAME_NOT_RESOLVED/.test(t)) return;
   if (m.type() === 'error') problems.push(`console: ${t.slice(0, 160)}`);
 });
 page.on('pageerror', e => problems.push(`pageerror: ${e.message.slice(0, 160)}`));
@@ -68,8 +72,15 @@ const shot = async (name, ms = 900) => {
 };
 
 console.log('→ feed');
-await page.goto(BASE, { waitUntil: 'networkidle', timeout: 45000 });
-await page.waitForSelector('.feed-card', { timeout: 25000 });
+// networkidle no longer settles: the app now streams a 27,590-show catalogue,
+// resolves trailers and builds a kinship graph, so there is always something
+// in flight. Wait for the thing that actually matters instead.
+await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 45000 });
+await page.waitForSelector('.feed-card', { timeout: 30000 });
+// And for the second catalogue tier to land, since it re-ranks the feed.
+await page.waitForFunction(
+  () => !document.body.textContent.includes('loading more'), { timeout: 40000 },
+).catch(() => {});
 await shot('01-feed', 7000);
 
 // Prove the scroll-snap actually snaps: scroll a partial card height and check
@@ -81,9 +92,14 @@ await scroller.evaluate((el, h) => el.scrollBy({ top: h * 0.55, behavior: 'smoot
 await page.waitForTimeout(1400);
 const pos = await scroller.evaluate(el => ({ top: el.scrollTop, h: el.clientHeight }));
 const offBy = Math.abs(pos.top % pos.h);
-const snapped = offBy < 2 || Math.abs(offBy - pos.h) < 2;
-console.log(`  scrollTop=${pos.top} cardHeight=${pos.h} → ${snapped ? 'SNAPPED' : 'DID NOT SNAP'}`);
-if (!snapped) problems.push(`scroll did not snap: scrollTop ${pos.top} vs card ${pos.h}`);
+const onBoundary = offBy < 2 || Math.abs(offBy - pos.h) < 2;
+// A 55% flick must land on the NEXT card, not spring back. Checking only that
+// the offset divides evenly passed trivially when nothing moved at all.
+const moved = pos.top > 0;
+const snapped = onBoundary && moved;
+console.log(`  scrollTop=${pos.top} cardHeight=${pos.h} → ` +
+  `${snapped ? 'SNAPPED to card ' + (pos.top / pos.h + 1) : onBoundary ? 'DID NOT MOVE' : 'DID NOT SNAP'}`);
+if (!snapped) problems.push(`scroll did not snap forward: scrollTop ${pos.top} vs card ${pos.h}`);
 await shot('02-feed-scrolled', 4500);
 
 console.log('→ detail sheet');

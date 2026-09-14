@@ -14,7 +14,10 @@
     "test:sw": "node scripts/test-sw.mjs",
     "test:ui": "node scripts/test-interactions.mjs",
     "check:curated": "node scripts/check-curated.mjs",
-    "test:trailer": "node scripts/test-trailer.mjs && node scripts/test-trailer-feed.mjs"
+    "test:trailer": "node scripts/test-trailer.mjs && node scripts/test-trailer-feed.mjs",
+    "bake": "node scripts/bake-catalogue.mjs",
+    "bake:dry": "node scripts/bake-catalogue.mjs --dry",
+    "test:rank": "node scripts/test-rank.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",

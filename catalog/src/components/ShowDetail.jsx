@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Bookmark, BookmarkCheck, EyeOff, ExternalLink, Loader2, Check,
-  CalendarClock, Baby, Heart, Accessibility, ChevronDown,
+  CalendarClock, Baby, Heart, Accessibility, ChevronDown, AlertTriangle,
 } from 'lucide-react';
 import { useStore, actions, watchedSet } from '../lib/store.js';
 import {
@@ -249,6 +249,48 @@ export default function ShowDetail({ show, enriched, loading, onClose }) {
               </Unknown>
             )}
           </Block>
+
+          {show._terms?.length > 0 && (
+            <Block title="Why this is in your feed">
+              <p className="mb-2 text-[12.5px] leading-snug text-haze-200">{show._why}</p>
+              <ul className="space-y-1">
+                {show._terms.filter(t => Math.abs(t.value) >= 0.3).map((t, i) => (
+                  <li key={i} className="flex items-baseline gap-2 text-[12px]">
+                    <span className={`w-11 shrink-0 text-right font-mono tabular-nums
+                      ${t.value > 0 ? 'text-mint' : 'text-pop-soft'}`}>
+                      {t.value > 0 ? '+' : ''}{t.value}
+                    </span>
+                    <span className="text-haze-200">
+                      {t.person && <span className="text-haze-400">{t.person}: </span>}
+                      {t.why || t.name}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[10.5px] leading-snug text-haze-400">
+                These add up to the position this show has in your feed. Nothing is
+                hidden and there is no match percentage — a percentage is a number
+                you cannot argue with, and every line here you can.
+                {show._confidence === 'guessing' &&
+                  ' Confidence is low: mark some episodes watched and this sharpens.'}
+              </p>
+            </Block>
+          )}
+
+          {show._warnings?.length > 0 && (
+            <Block title="Before you start">
+              <ul className="space-y-1.5">
+                {show._warnings.map((w, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-[12.5px] leading-snug text-gold">
+                    <AlertTriangle size={12} className="mt-0.5 shrink-0" />{w}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[10.5px] text-haze-400">
+                A recommender paid to keep you watching would not show you this.
+              </p>
+            </Block>
+          )}
 
           {show.summary && (
             <Block title="What it is">

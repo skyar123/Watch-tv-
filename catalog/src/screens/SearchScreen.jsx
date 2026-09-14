@@ -1,30 +1,47 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search as SearchIcon, Loader2, X } from 'lucide-react';
 import { searchShows } from '../lib/tvmaze.js';
+import { searchLocal } from '../lib/catalogue.js';
 import { totalTime } from '../lib/derive.js';
 import { useStore } from '../lib/store.js';
 import { StatusBadge, HoursChip, Unknown } from '../components/bits.jsx';
 
-export default function SearchScreen({ onOpen }) {
+export default function SearchScreen({ onOpen, catalogue = [] }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const state = useStore();
   const timer = useRef(null);
 
+  const [source, setSource] = useState('local');
+
   useEffect(() => {
     clearTimeout(timer.current);
-    if (q.trim().length < 2) { setResults(null); return; }
+    const needle = q.trim();
+    if (needle.length < 2) { setResults(null); return; }
+
+    // The whole catalogue is already in memory, so the first results are
+    // instant and work offline. No request, no spinner, no debounce.
+    const local = searchLocal(catalogue, needle)
+      .filter(s => !state.notForMe[s.key])
+      .map(show => ({ show, score: 1 }));
+    setResults(local);
+    setSource('local');
+
+    // Then ask TVmaze, which reaches the ~62,000 shows the bake filtered out
+    // for having no artwork or no rating. Only replaces the local results if
+    // it genuinely finds more.
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const { results: r } = await searchShows(q.trim());
-        setResults(r.filter(x => !state.notForMe[x.show.key]));
-      } catch { setResults([]); }
+        const { results: r } = await searchShows(needle);
+        const remote = r.filter(x => !state.notForMe[x.show.key]);
+        if (remote.length > local.length) { setResults(remote); setSource('tvmaze'); }
+      } catch { /* the local results stand */ }
       finally { setLoading(false); }
-    }, 320);
+    }, 380);
     return () => clearTimeout(timer.current);
-  }, [q, state.notForMe]);
+  }, [q, state.notForMe, catalogue]);
 
   return (
     <div className="px-safe pt-safe">
@@ -64,7 +81,7 @@ export default function SearchScreen({ onOpen }) {
       )}
 
       {results?.length === 0 && !loading && (
-        <Unknown>Nothing on TVmaze matching “{q}”.</Unknown>
+        <Unknown>Nothing matching “{q}”, here or on TVmaze.</Unknown>
       )}
 
       <div className="space-y-2">
@@ -99,8 +116,11 @@ export default function SearchScreen({ onOpen }) {
       </div>
 
       {results?.length > 0 && (
-        <p className="mt-4 text-[10px] text-haze-400">
-          Search from TVmaze. Total hours and ratings load when you open a show.
+        <p className="mt-4 text-[10px] leading-snug text-haze-400">
+          {source === 'local'
+            ? `Instant, from the ${catalogue.length.toLocaleString()} shows held on this phone.`
+            : 'From TVmaze — this one was outside the offline catalogue.'}
+          {' '}Total hours and ratings load when you open a show.
         </p>
       )}
     </div>

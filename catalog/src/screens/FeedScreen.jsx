@@ -16,10 +16,10 @@ import { cliffhangerRisk } from '../lib/derive.js';
  *
  * Two rules do most of the work here:
  *
- *  1. Exactly one card is "active" at a time, decided by IntersectionObserver
- *     rather than by scroll maths. Only the active card gets a trailer, and
- *     leaving a card destroys its player. A phone will happily let you build a
- *     stack of twenty decoding video elements and then die.
+ *  1. Exactly one card is "active" at a time, computed from the scroll offset.
+ *     Only the active card gets a trailer, and leaving a card destroys its
+ *     player — a phone will happily let you build a stack of twenty decoding
+ *     video elements and then die.
  *
  *  2. Enrichment (TMDB trailer + providers) is lazy and only for cards near the
  *     one you are looking at. Enriching the whole list on load would be dozens
@@ -40,29 +40,48 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
 
   // Switching profile changes the whole order, so start from the top rather
   // than leaving you halfway down someone else's feed.
+  //
+  // The same applies when the catalogue's second tier lands and the ranking is
+  // rebuilt: the scroll position is preserved by the browser but now points at
+  // a completely different show. Keying on the first show's identity catches
+  // both cases and ignores harmless re-renders.
+  const topKey = visible[0]?.key;
   useEffect(() => {
     containerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
     setActiveIdx(0);
-  }, [state.profileId]);
+  }, [state.profileId, topKey]);
 
-  // Which card is centred. threshold 0.6 means a card must genuinely own the
-  // screen before it starts playing, so a fast flick past does not fire five
-  // players in a row.
+  /**
+   * Which card is centred.
+   *
+   * This was an IntersectionObserver, and it desynchronised: the observer is
+   * set up once per list length, so when the catalogue's second tier landed and
+   * the ranking was rebuilt, it went on watching nodes whose data-idx had moved
+   * underneath it. The feed sat on index 296 of 457 while scrollTop was 0,
+   * showing a blank placeholder.
+   *
+   * Scroll-snap makes an observer unnecessary. The container always comes to
+   * rest on an exact multiple of the card height, so the index is arithmetic —
+   * it cannot drift, it needs no bookkeeping, and it does not care how many
+   * rows there are.
+   */
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
-    const io = new IntersectionObserver(entries => {
-      for (const e of entries) {
-        if (e.isIntersecting && e.intersectionRatio >= 0.6) {
-          const i = Number(e.target.dataset.idx);
-          if (Number.isFinite(i)) setActiveIdx(i);
-        }
-      }
-    }, { root, threshold: [0.6] });
-
-    const cards = root.querySelectorAll('[data-idx]');
-    cards.forEach(c => io.observe(c));
-    return () => io.disconnect();
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      const h = root.clientHeight || 1;
+      const i = Math.round(root.scrollTop / h);
+      setActiveIdx(prev => (prev === i ? prev : Math.max(0, Math.min(i, visible.length - 1))));
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(read); };
+    root.addEventListener('scroll', onScroll, { passive: true });
+    read();
+    return () => {
+      root.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [visible.length]);
 
   // Mark as seen so Tonight can avoid re-suggesting what you just scrolled past.
@@ -230,7 +249,11 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
         <div className="pointer-events-auto flex flex-col items-start gap-1.5">
           <ProfileBar collapsed />
           <span className="rounded-full glass px-3 py-1 text-[11px] text-haze-300">
-            {activeIdx + 1} / {visible.length} · <Freshness meta={meta} label="" />
+            {activeIdx + 1} / {visible.length}
+            {meta?.total > visible.length && (
+              <span className="text-haze-400"> of {meta.total.toLocaleString()}</span>
+            )}
+            {meta?.loaded === 'core' && <span className="text-gold"> · loading more</span>}
           </span>
         </div>
         <button

@@ -16,6 +16,10 @@ import { handler as newsHandler } from '../netlify/functions/news.js';
 export async function installLiveApiShim(page, { tmdbKey = process.env.TMDB_API_KEY } = {}) {
   const stats = { tvmaze: 0, images: 0, news: 0, tmdb: 0, trailers: 0, failed: 0 };
 
+  // The catalogue is a static file in dist; the preview server serves it, so
+  // nothing to intercept. Left as a note because its absence here is easy to
+  // mistake for a missing route.
+
   await page.route('**://api.tvmaze.com/**', async route => {
     try {
       const res = await fetch(route.request().url(), {

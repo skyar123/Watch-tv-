@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BottomNav from './components/BottomNav.jsx';
 import Sheet from './components/Sheet.jsx';
 import ShowDetail from './components/ShowDetail.jsx';
@@ -8,11 +8,15 @@ import MineScreen from './screens/MineScreen.jsx';
 import NewsScreen from './screens/NewsScreen.jsx';
 import SearchScreen from './screens/SearchScreen.jsx';
 import SettingsScreen from './screens/SettingsScreen.jsx';
-import { fetchIndexPage, fetchShow } from './lib/tvmaze.js';
+import { fetchShow } from './lib/tvmaze.js';
+import { loadCatalogue } from './lib/catalogue.js';
+import { buildIdf } from './lib/taste.js';
+import { buildKinship } from './lib/kinship.js';
+import { rankCatalogue, rankTogetherCatalogue, appetiteOf } from './lib/rank.js';
 import { REPRESENTATION, ENDINGS, CONTENT } from './data/curated.js';
 import { refresh } from './lib/api.js';
 import { useStore, providerChanges, getRaw, view, TOGETHER } from './lib/store.js';
-import { buildTaste, rankForTaste, rankTogether } from './lib/taste.js';
+import { buildTaste } from './lib/taste.js';
 import { installSync } from './lib/sync.js';
 import ProfileBar from './components/ProfileBar.jsx';
 
@@ -40,31 +44,19 @@ export default function App() {
   const loadPool = useCallback(async () => {
     setLoading(true);
     try {
-      const { shows, meta } = await fetchIndexPage(0);
-      // TVmaze `weight` is its own popularity measure; a feed ordered by it
-      // opens on things worth looking at rather than alphabetically.
-      const ranked = shows
-        .filter(s => s.poster && s.summary && s.type === 'Scripted')
-        .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || (b.rating ?? 0) - (a.rating ?? 0));
-      setPool(ranked);
-      setPoolMeta(meta);
-
-      // Every hand-checked show, pulled in by id. Page 0 of the catalogue is
-      // ordered by id, so none of the representation entries are in it — and a
-      // "queer stories" mood that cannot reach Pose or Heartstopper is a
-      // decoration. These are the shows the curation exists for.
-      const curatedIds = [...new Set([
-        ...Object.keys(REPRESENTATION), ...Object.keys(ENDINGS), ...Object.keys(CONTENT),
-      ])].map(Number);
-      const extra = (await Promise.all(curatedIds.map(id =>
-        fetchShow(id).then(r => r.show).catch(() => null)))).filter(Boolean);
-      setPool(prev => {
-        const have = new Set(prev.map(s => s.key));
-        return [...prev, ...extra.filter(s => !have.has(s.key))];
+      // The catalogue arrives in two pieces: the popular core first so the feed
+      // starts, then the rest. The old code fetched /shows?page=0 at runtime —
+      // 250 shows out of 94,500 — which is why nothing here could ever feel
+      // like a real recommendation.
+      await loadCatalogue((shows, meta) => {
+        buildIdf(shows);          // feature rarity, recomputed as the pool grows
+        setPool(shows);
+        setPoolMeta(meta);
+        setLoading(false);
       });
-    } catch {
+    } catch (e) {
       setPool([]);
-    } finally {
+      setPoolMeta({ error: e.message });
       setLoading(false);
     }
   }, []);
@@ -106,6 +98,47 @@ export default function App() {
     return m;
   }, [pool, detailShows]);
 
+  /**
+   * Shows this person finished, which is what kinship is computed outward from.
+   */
+  const finishedSeeds = useMemo(() => {
+    const out = [];
+    for (const [key, eps] of Object.entries(state.watched || {})) {
+      const show = showsByKey.get(key);
+      if (!show?.episodes) continue;
+      const total = show.episodes.filter(e => e.type === 'regular').length;
+      if (total && Object.keys(eps).length / total >= 0.9) out.push(show);
+    }
+    return out.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+  }, [state.watched, showsByKey]);
+
+  const [kinship, setKinship] = useState(new Map());
+  const kinshipFor = useRef('');
+
+  useEffect(() => {
+    const sig = `${state.profileId}|${finishedSeeds.map(s => s.tvmazeId).join(',')}`;
+    if (!finishedSeeds.length || kinshipFor.current === sig) return;
+    kinshipFor.current = sig;
+    let dead = false;
+    buildKinship(finishedSeeds)
+      .then(m => { if (!dead) setKinship(m); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [finishedSeeds, state.profileId]);
+
+  // Narrow deps, like taste and languages above. Depending on the whole store
+  // object meant every "mark seen" produced a new appetite, which re-ran the
+  // ranking effect, which replaced every card in the feed — cards were
+  // detaching from the DOM mid-tap.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const appetite = useMemo(() => appetiteOf(state, showsByKey), [state.watched, showsByKey]);
+
+  /** The languages this person actually watches in. */
+  const languages = useMemo(() => new Set(
+    Object.keys(state.watched || {})
+      .map(k => showsByKey.get(k)?.language).filter(Boolean),
+  ), [state.watched, showsByKey]);
+
   const taste = useMemo(
     () => buildTaste(state, showsByKey),
     // Taste is built from saves, finishes and hides. Rebuilding it because a
@@ -145,21 +178,34 @@ export default function App() {
     if (!pool.length) { setRanked([]); return; }
     const s = getRaw();
     const v = view(s);
+    const shared = {
+      seen: v.seen, notForMe: v.notForMe, watched: v.watched,
+      hideUnavailable: v.hideUnavailable, languages,
+      // Providers are only known for shows the feed has already enriched, so
+      // this is a bonus where we have it rather than a filter we pretend to.
+      availabilityFor: () => ({ known: false, onMine: [] }),
+    };
+
     if (v.isTogether) {
       const people = (v.others || []).map(p => ({
-        id: p.id, name: p.name, taste: buildTaste(p, showsByKey),
+        id: p.id, name: p.name,
+        taste: buildTaste(p, showsByKey),
+        kinship,
+        appetite: appetiteOf(p, showsByKey),
       }));
-      setRanked(rankTogether(pool, people, {
-        seen: v.seen, notForMe: v.notForMe, watched: v.watched,
-      }).map(r => ({ ...r.show, _why: r.reason, _both: r.both })));
+      setRanked(rankTogetherCatalogue(pool, people, shared)
+        .map(r => ({ ...r.show, _why: r.reason, _terms: r.terms,
+                     _warnings: r.warnings, _confidence: r.confidence })));
       return;
     }
-    setRanked(rankForTaste(pool, taste, { seen: v.seen, notForMe: v.notForMe })
-      .map(r => ({ ...r.show, _why: r.taste.reason, _confidence: r.taste.confidence })));
-    // orderKey is the whole point: it is the list of things that may reorder
-    // the feed, and `seen` is deliberately not one of them.
+
+    setRanked(rankCatalogue(pool, { ...shared, taste, kinship, appetite })
+      .map(r => ({ ...r.show, _why: r.reason, _terms: r.terms, _warnings: r.warnings,
+                   _confidence: r.confidence, _explore: r.explore })));
+    // orderKey is the list of things that may legitimately reorder the feed;
+    // `seen` is deliberately not one of them. See the note above it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderKey, pool, showsByKey, taste]);
+  }, [orderKey, pool, showsByKey, taste, kinship, appetite, languages]);
 
   const changes = providerChanges(state);
   const leavingCount = changes.filter(c => c.saved && c.lost.length).length;
@@ -189,7 +235,7 @@ export default function App() {
                       onSettings={() => setSettingsOpen(true)} />
         )}
         {tab === 'news' && <NewsScreen />}
-        {tab === 'search' && <SearchScreen onOpen={openDetail} />}
+        {tab === 'search' && <SearchScreen onOpen={openDetail} catalogue={pool} />}
       </main>
 
       <BottomNav tab={tab} onChange={setTab} badge={{ mine: leavingCount }} />
