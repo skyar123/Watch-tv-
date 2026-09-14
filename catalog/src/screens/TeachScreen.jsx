@@ -112,9 +112,10 @@ export default function TeachScreen({ catalogue = [], onClose }) {
 
   return (
     <div className="px-4 pb-8">
+      {/* No heading: the sheet already carries the title, and repeating it
+          wastes the only screen-height that matters on a phone. */}
       <header className="pt-1">
-        <h2 className="text-[19px] font-bold tracking-tight">Tell it what you like</h2>
-        <p className="mt-1 text-[12.5px] leading-snug text-haze-400">
+        <p className="text-[12.5px] leading-snug text-haze-400">
           One tap here beats an hour of scrolling. “Loved it” is the strongest thing you can
           tell it; “Seen it” counts as finished without ticking off every episode.
         </p>
@@ -136,8 +137,10 @@ export default function TeachScreen({ catalogue = [], onClose }) {
           </button>
         ))}
       </div>
-      <p className="mt-1.5 text-[11px] text-haze-400">
-        You can fill in {people.find(([id]) => id !== v.profileId)?.[1]?.name || 'the other profile'}’s
+      <p className="mt-1.5 text-[11px] leading-snug text-haze-400">
+        {/* Relative to who is being TAUGHT, not to who is signed in — naming
+            the person whose chip is already highlighted read as a bug. */}
+        You can fill in {people.find(([id]) => id !== target)?.[1]?.name || 'the other profile'}’s
         too — you know what they like, and switching profiles to do it means nobody ever does.
       </p>
 

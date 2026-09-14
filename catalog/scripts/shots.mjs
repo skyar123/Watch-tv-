@@ -162,6 +162,19 @@ await page.waitForTimeout(600);
 await page.locator('button', { hasText: 'A good story' }).first().click();
 await shot('10-together', 2000);
 
+console.log('→ teach it what you like');
+await page.locator('nav button', { hasText: 'Mine' }).click();
+await page.waitForTimeout(400);
+const teach = page.locator('button', { hasText: 'Tell it what you already like' });
+if (await teach.count()) {
+  await teach.first().click();
+  await page.waitForSelector('[role="dialog"]');
+  await page.waitForTimeout(900);
+  await shot('16-teach', 600);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 8000 }).catch(() => {});
+}
+
 console.log('→ settings: profiles, taste, sync');
 await page.locator('nav button', { hasText: 'Mine' }).click();
 await page.waitForTimeout(300);
