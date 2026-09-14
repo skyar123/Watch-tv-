@@ -175,3 +175,44 @@ regardless of User-Agent — observed returning 200, then 403 minutes later. The
 stay in the list, and the news function reports per-source status so an outlet
 that drops out is visible as "unreachable" rather than looking like a slow news
 day.
+
+## Recency: what TVmaze does and does not tell you
+
+`GET /shows?page=N` returns `premiered` as a full ISO date and `_links.nextepisode`
+when an episode is still scheduled. The second of those is the only factual
+"is this on the air right now" signal available without fetching every show
+individually, and it is present on about 3% of rows (38 of 130 Running shows in
+a 1,425-row sample). Both are baked: the full premiere date for anything within
+three years, since the year alone cannot tell "out last month" from "out in
+eleven weeks", and an `airing` flag.
+
+`weight` is a trap. It is presented like a property of the show and it is a
+rolling measure of what everyone is looking at this week. Re-baking one day
+apart, 16,719 of the 24,121 shows present in both bakes had their weight
+change, and 3,469 crossed the old cutoff and vanished from the index:
+Rebelde 90 to 55 overnight, Whale Wars 87 to 58, Sherlock Holmes 83 to 39, all
+confirmed against `/shows/{id}` directly. So the threshold governs admission
+only, and a show already in the index stays while it still has artwork.
+`scripts/prove-catalogue.mjs` checks that on every re-bake and asks TVmaze
+about anything that left, rather than assuming it was deleted.
+
+## News: matching an article to a show
+
+`scripts/test-newsmatch.mjs` runs the matcher over the live feeds and prints
+every match. The numbers that matter, measured on 197 real articles:
+
+| approach | articles matched | correct |
+|---|---|---|
+| any of the 32,138 catalogue titles, anywhere in the text | 76% | mostly not |
+| quoted titles plus your own saved shows | 10% | 19 of 19 |
+
+The first approach reported an Autostraddle piece headlined "My Girlfriend
+Thinks I'm Prioritizing Exercise Over Her" as being about the show *Girlfriend*.
+With 32,000 titles, nearly every ordinary English word is a show somewhere.
+
+Two things about quote extraction that are not obvious. A closing single quote
+and an apostrophe are the same character, so extraction has to require a
+matching opening mark or every possessive becomes a title. And publications use
+quotes for reported speech as well as for titles, which turned "LGBTQ+ book shop
+'blown away' by support" into coverage of *Blown Away*; house style separates
+them, because a title is capitalised and a scare quote is not.

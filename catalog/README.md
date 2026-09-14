@@ -36,6 +36,17 @@ you choose. This is only the choosing part.
 |---|---|---|---|
 | ![](shots/09-news.png) | ![](shots/08-search.png) | ![](shots/11-settings-profiles.png) | ![](shots/12-settings-taste.png) |
 
+| Grid | News about your shows |
+|---|---|
+| ![](shots/grid.png) | ![](shots/news.png) |
+
+The feed is the good way to decide and a slow way to look, so there is a 2-up
+grid behind the toggle in the header: six shows a screen instead of one, quick
+save and hide on each tile, and tapping one drops you into the feed on that
+show. It costs nothing to scroll, because a tile needs only the poster that is
+already in the baked catalogue row, while a feed card needs a backdrop and a
+trailer.
+
 ## Two people, one link
 
 Skylar and Anja each get their own space. **Together** is not a third person:
@@ -181,9 +192,19 @@ that bug hid the app's own "TMDB key not set" behind a generic network error.
 ### The feed
 
 Full-screen scroll-snap (`y mandatory` + `scroll-snap-stop: always`, verified to
-land exactly on card boundaries). An IntersectionObserver at 0.6 decides the one
-active card; only that card mounts a trailer and leaving it destroys the player,
+land exactly on card boundaries). The active card is computed from the scroll
+offset rather than observed, because scroll-snap makes the index exact
+arithmetic; only that card mounts a trailer and leaving it destroys the player,
 so a long scroll never leaves a stack of decoding videos behind.
+
+Swiping a card sideways while the feed scrolls vertically needs an axis lock,
+and the lock has to have a margin. Deciding by `|dx| > |dy|` makes (10, 9) a
+swipe and (9, 10) a scroll, and those are the same flick: an axis has to win by
+a margin, anything in the wedge between the two cones stays undecided, and a
+gesture that never resolves goes to the browser. `scripts/test-swipe.mjs` sweeps
+0 to 90 degrees and asserts the boundary is a single clean crossing, because a
+lock decided by pixel luck gives a scattered pattern and scattered is what
+finicky feels like in the hand.
 
 Trailers are YouTube IFrame embeds because TMDB gives YouTube keys and YouTube's
 terms require their player. `mute=1` and `playsinline=1` are requirements, not
