@@ -43,6 +43,10 @@ const EMPTY = {
   household: null,          // shared id; both phones use the same one to sync
   active: 'p1',
   hideUnavailable: false,
+  // 'feed' (one show a screen) or 'grid' (2-up). Kept across reloads because
+  // it is a way of using the app, not a transient toggle, and being dropped
+  // back into the feed every launch would make the grid feel like a detour.
+  feedView: 'feed',
   profiles: {
     p1: emptyProfile('Skylar', '🌙'),
     p2: emptyProfile('Anja', '✨'),
@@ -132,6 +136,7 @@ export function view(s = state) {
       profiles: s.profiles,
       household: s.household,
       hideUnavailable: s.hideUnavailable,
+      feedView: s.feedView || 'feed',
       lastSyncAt: s.lastSyncAt,
       // Who else is on this link, for the Together copy.
       others: people.filter(([k]) => k !== id).map(([k, p]) => ({ id: k, ...p })),
@@ -147,6 +152,7 @@ export function view(s = state) {
     profiles: s.profiles,
     household: s.household,
     hideUnavailable: s.hideUnavailable,
+    feedView: s.feedView || 'feed',
     lastSyncAt: s.lastSyncAt,
     others: people.map(([k, p]) => ({ id: k, ...p })),
     // Union: you watch together on one screen, so either subscription works.
@@ -336,6 +342,7 @@ export const actions = {
 
   setServices(list) { patchProfile(state.active, { services: list }); },
   setHideUnavailable(v) { commit({ ...state, hideUnavailable: Boolean(v) }); },
+  setFeedView(v) { commit({ ...state, feedView: v === 'grid' ? 'grid' : 'feed' }); },
   markSeen(key) {
     const id = state.active;
     const p = state.profiles[id];

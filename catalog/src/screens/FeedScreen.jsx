@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { RefreshCw, Loader2, Sparkles } from 'lucide-react';
+import { RefreshCw, Loader2, Sparkles, LayoutGrid, Rows3 } from 'lucide-react';
 import FeedCard from '../components/FeedCard.jsx';
+import GridView from '../components/GridView.jsx';
 import { useStore, actions } from '../lib/store.js';
 import ProfileBar from '../components/ProfileBar.jsx';
 import { totalTime } from '../lib/derive.js';
@@ -30,11 +31,19 @@ import { cliffhangerRisk } from '../lib/derive.js';
 export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
                                     pendingLessons = 0, onRerank }) {
   const containerRef = useRef(null);
+  const gridRef = useRef(null);
+  /**
+   * Switching to the feed from a grid tile has to scroll to that show, and the
+   * feed container does not exist while the grid is up. So the index is parked
+   * here and an effect consumes it on the render after the mode flips.
+   */
+  const jumpTo = useRef(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [muted, setMuted] = useState(true);
   const [enrichment, setEnrichment] = useState({});   // showKey -> { trailerKey, providers, ... }
   const claimed = useRef(new Set());                  // shows already being fetched
   const state = useStore();
+  const isGrid = state.feedView === 'grid';
 
   const visible = useMemo(
     () => shows.filter(s => !state.notForMe[s.key]),
@@ -70,7 +79,7 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
    */
   useEffect(() => {
     const root = containerRef.current;
-    if (!root) return;
+    if (!root) return;                     // grid mode: there is no feed to read
     let frame = 0;
     const read = () => {
       frame = 0;
@@ -85,13 +94,39 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
       root.removeEventListener('scroll', onScroll);
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [visible.length]);
+    // isGrid is a dependency because the container this listens to is
+    // unmounted while the grid is up. Without it the cleanup detached the
+    // listener on the way into the grid and nothing re-attached it on the way
+    // back, so the feed scrolled with a frozen index and the wrong card kept
+    // its trailer.
+  }, [visible.length, isGrid]);
 
   // Mark as seen so Tonight can avoid re-suggesting what you just scrolled past.
+  //
+  // Only in the feed. A tile going past in the grid is not the same as having
+  // looked at a show, and counting it would let one fast scroll mark forty
+  // shows as seen and then penalise every one of them.
   useEffect(() => {
+    if (isGrid) return;
     const show = visible[activeIdx];
     if (show) actions.markSeen(show.key);
-  }, [activeIdx, visible]);
+  }, [activeIdx, visible, isGrid]);
+
+  /**
+   * Land on the show whose tile was tapped.
+   *
+   * The feed container is mounted by this render, so the scroll has to wait
+   * for it; a layout effect would still be a frame early on the first mount.
+   */
+  useEffect(() => {
+    if (isGrid || jumpTo.current == null) return;
+    const i = jumpTo.current;
+    jumpTo.current = null;
+    const root = containerRef.current;
+    if (!root) return;
+    root.scrollTo({ top: i * root.clientHeight, behavior: 'instant' });
+    setActiveIdx(i);
+  }, [isGrid]);
 
   // Enrich the active card and the next two. Nothing further ahead.
   //
@@ -102,6 +137,10 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
   // "looking for a trailer" forever.
   useEffect(() => {
     let cancelled = false;
+    // The grid shows posters, which are already in the baked row. Enriching
+    // from it would fire trailer and provider lookups for shows nobody has
+    // opened, which is the opposite of why the grid exists.
+    if (isGrid) return;
     const want = [activeIdx, activeIdx + 1, activeIdx + 2]
       .map(i => visible[i]).filter(s => s && !claimed.current.has(s.key));
     if (!want.length) return;
@@ -213,7 +252,7 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
     })();
 
     return () => { cancelled = true; };
-  }, [activeIdx, visible]);
+  }, [activeIdx, visible, isGrid]);
 
   const handleOpen = useCallback(show => onOpen(show, enrichment[show.key]), [onOpen, enrichment]);
   const handleSave = useCallback((show, opts) => {
@@ -256,7 +295,9 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
         <div className="pointer-events-auto flex flex-col items-start gap-1.5">
           <ProfileBar collapsed />
           <span className="rounded-full glass px-3 py-1 text-[11px] text-haze-300">
-            {activeIdx + 1} / {visible.length}
+            {/* "12 / 457" is a position, and the grid has no single position.
+                Showing one anyway would be a number that means nothing. */}
+            {isGrid ? `${visible.length} shows` : `${activeIdx + 1} / ${visible.length}`}
             {meta?.total > visible.length && (
               <span className="text-haze-400"> of {meta.total.toLocaleString()}</span>
             )}
@@ -264,6 +305,15 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
           </span>
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => actions.setFeedView(isGrid ? 'feed' : 'grid')}
+            className="tap rounded-full glass border border-white/15 text-white"
+            aria-label={isGrid ? 'Switch to the full-screen feed' : 'Switch to the grid'}
+            aria-pressed={isGrid}
+          >
+            {isGrid ? <Rows3 size={17} /> : <LayoutGrid size={17} />}
+          </button>
           {/* Offered rather than done to you: the feed holds still while you
               swipe, and you decide when to let it re-read what it learned. */}
           {pendingLessons >= 4 && (
@@ -288,6 +338,16 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
         </div>
       </div>
 
+      {isGrid ? (
+        <GridView
+          shows={visible}
+          saved={state.saved}
+          scrollRef={gridRef}
+          onOpenShow={(show, i) => { jumpTo.current = i; actions.setFeedView('feed'); }}
+          onSave={handleSave}
+          onHide={handleHide}
+        />
+      ) : (
       <div ref={containerRef} className="feed-scroll h-screen-d overflow-y-scroll">
         {visible.map((show, i) => {
           const e = enrichment[show.key];
@@ -321,6 +381,7 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
           );
         })}
       </div>
+      )}
     </div>
   );
 }
