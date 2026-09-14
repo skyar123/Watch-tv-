@@ -32,6 +32,7 @@ const emptyProfile = (name, emoji) => ({
   providerLog: {},  // showKey -> [{ at, names[] }]
   moodLog: [],
   taste: { likes: {}, dislikes: {}, explicit: {} },   // see lib/taste.js
+  lastAction: null,  // the most recent swipe, so it can be undone
   updatedAt: 0,
 });
 
@@ -189,11 +190,13 @@ export const actions = {
     patchProfile(id, { name: name.slice(0, 24), ...(emoji ? { emoji } : {}) });
   },
 
-  save(show) {
+  save(show, { viaSwipe = false } = {}) {
     const id = state.active;
     const p = state.profiles[id];
     patchProfile(id, {
-      saved: { ...p.saved, [show.key]: { addedAt: Date.now(), name: show.name, poster: show.poster } },
+      saved: { ...p.saved,
+        [show.key]: { addedAt: Date.now(), name: show.name, poster: show.poster, viaSwipe } },
+      lastAction: { kind: 'save', key: show.key, name: show.name, at: Date.now() },
     });
   },
   unsave(key) {
@@ -215,8 +218,38 @@ export const actions = {
     const id = state.active;
     const p = state.profiles[id];
     const saved = { ...p.saved };
+    const wasSaved = saved[show.key];
     delete saved[show.key];
-    patchProfile(id, { saved, notForMe: { ...p.notForMe, [show.key]: Date.now() } });
+    patchProfile(id, {
+      saved,
+      notForMe: { ...p.notForMe, [show.key]: Date.now() },
+      // Enough to put things back exactly as they were, including a save the
+      // hide displaced. Swiping is fast and a mis-flick must not cost anything.
+      lastAction: { kind: 'hide', key: show.key, name: show.name, at: Date.now(), wasSaved },
+    });
+  },
+
+  /** Reverse the last swipe. */
+  undoLast() {
+    const id = state.active;
+    const p = state.profiles[id];
+    const last = p.lastAction;
+    if (!last) return null;
+    if (last.kind === 'save') {
+      const saved = { ...p.saved };
+      delete saved[last.key];
+      patchProfile(id, { saved, lastAction: null });
+    } else {
+      const n = { ...p.notForMe };
+      delete n[last.key];
+      const saved = { ...p.saved };
+      if (last.wasSaved) saved[last.key] = last.wasSaved;
+      patchProfile(id, { notForMe: n, saved, lastAction: null });
+    }
+    return last;
+  },
+  clearLastAction() {
+    if (state.profiles[state.active]?.lastAction) patchProfile(state.active, { lastAction: null });
   },
   unhide(key) {
     const id = state.active;

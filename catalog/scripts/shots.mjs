@@ -102,6 +102,25 @@ console.log(`  scrollTop=${pos.top} cardHeight=${pos.h} → ` +
 if (!snapped) problems.push(`scroll did not snap forward: scrollTop ${pos.top} vs card ${pos.h}`);
 await shot('02-feed-scrolled', 4500);
 
+console.log('→ swipe, mid-gesture');
+await scroller.evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+await page.waitForTimeout(700);
+await page.mouse.move(150, 430);
+await page.mouse.down();
+for (let x = 150; x <= 290; x += 20) { await page.mouse.move(x, 428); await page.waitForTimeout(18); }
+await shot('13-swipe-save', 250);
+await page.mouse.move(150, 430);
+for (let x = 150; x >= 40; x -= 18) { await page.mouse.move(x, 430); await page.waitForTimeout(18); }
+await shot('14-swipe-pass', 250);
+await page.mouse.up();
+await page.waitForTimeout(900);
+// And the undo affordance the swipe leaves behind.
+await shot('15-undo', 400);
+const undo = page.locator('button', { hasText: 'Undo' });
+if (await undo.count()) { await undo.first().click(); await page.waitForTimeout(400); }
+await scroller.evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+await page.waitForTimeout(600);
+
 console.log('→ detail sheet');
 await page.locator('.feed-card button[aria-label^="Open details"]').first().click();
 await page.waitForSelector('[role="dialog"]', { timeout: 15000 });

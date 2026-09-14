@@ -1,7 +1,8 @@
-import { memo } from 'react';
-import { Bookmark, BookmarkCheck, EyeOff, Info, Sparkles } from 'lucide-react';
+import { memo, useRef } from 'react';
+import { Bookmark, BookmarkCheck, EyeOff, Info, Sparkles, Heart, X } from 'lucide-react';
 import TrailerLayer from './TrailerLayer.jsx';
 import { StatusBadge, ProviderRow, HoursChip, Unknown } from './bits.jsx';
+import { useSwipe } from '../lib/useSwipe.js';
 
 /**
  * One show, one screen.
@@ -20,11 +21,42 @@ function FeedCard({
   const backdrop = enriched?.backdrop || show.backdrop || show.poster;
   const year = show.premiered?.slice(0, 4);
 
+  const swipe = useSwipe({
+    onLike: () => onSave(show, { viaSwipe: true }),
+    onHide: () => onHide(show),
+    enabled: active,
+  });
+
+  // Double-tap to like, the gesture everyone already has in their thumbs.
+  const lastTap = useRef(0);
+  const onCardTap = () => {
+    const now = Date.now();
+    if (now - lastTap.current < 280) {
+      lastTap.current = 0;
+      swipe.trigger('like');
+      return;
+    }
+    lastTap.current = now;
+    setTimeout(() => { if (lastTap.current && Date.now() - lastTap.current >= 280) onOpen(show); }, 290);
+  };
+
   return (
     <section
       className="feed-card relative h-screen-d w-full overflow-hidden bg-ink-950"
       aria-label={show.name}
+      // pan-y hands vertical scrolling to the browser and reserves horizontal
+      // for the swipe. Without it iOS claims the whole gesture.
+      style={{ touchAction: 'pan-y' }}
+      {...swipe.handlers}
     >
+      <div
+        className="absolute inset-0"
+        style={{
+          transform: `translateX(${swipe.dx}px) rotate(${swipe.rotation}deg) scale(${swipe.scale})`,
+          transition: swipe.dx === 0 || swipe.flying
+            ? 'transform .24s cubic-bezier(.2,.9,.3,1)' : 'none',
+        }}
+      >
       {backdrop ? (
         <img
           src={backdrop}
@@ -60,10 +92,37 @@ function FeedCard({
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3
                       bg-gradient-to-t from-black via-black/70 to-transparent" />
 
-      {/* Whole-card tap opens the detail sheet. The buttons stop propagation. */}
+      {/* Swipe feedback. A wash of colour plus a stamp, both keyed to how close
+          the gesture is to committing, so you can feel where the line is and
+          back out before you cross it. */}
+      {swipe.direction && (
+        <>
+          <div
+            className={`pointer-events-none absolute inset-0 ${
+              swipe.direction === 'like' ? 'bg-mint' : 'bg-pop'}`}
+            style={{ opacity: swipe.progress * 0.22 }}
+            aria-hidden="true"
+          />
+          <div
+            className={`pointer-events-none absolute top-1/3 flex items-center gap-2
+              rounded-2xl border-[3px] px-4 py-2 text-2xl font-black uppercase tracking-wider
+              ${swipe.direction === 'like'
+                ? 'left-7 -rotate-12 border-mint text-mint'
+                : 'right-7 rotate-12 border-pop text-pop'}`}
+            style={{ opacity: Math.min(1, swipe.progress * 1.4) }}
+            aria-hidden="true"
+          >
+            {swipe.direction === 'like' ? <Heart size={26} fill="currentColor" /> : <X size={26} />}
+            {swipe.direction === 'like' ? 'Save' : 'Nope'}
+          </div>
+        </>
+      )}
+
+      {/* Whole-card tap opens the detail sheet; double-tap saves. The buttons
+          stop propagation. */}
       <button
         type="button"
-        onClick={() => onOpen(show)}
+        onClick={onCardTap}
         className="absolute inset-0 z-10"
         aria-label={`Open details for ${show.name}`}
       />
@@ -73,7 +132,7 @@ function FeedCard({
       <div className="absolute right-3 z-30 flex flex-col items-center gap-2"
            style={{ bottom: 'calc(env(safe-area-inset-bottom) + 8.5rem)' }}>
         <RailButton
-          onClick={() => onSave(show)}
+          onClick={() => (saved ? onSave(show) : swipe.trigger('like'))}
           active={saved}
           label={saved ? 'Saved to your list' : 'Save to your list'}
         >
@@ -82,7 +141,7 @@ function FeedCard({
         <RailButton onClick={() => onOpen(show)} label="Details">
           <Info size={21} />
         </RailButton>
-        <RailButton onClick={() => onHide(show)} label="Not for me" danger>
+        <RailButton onClick={() => swipe.trigger('hide')} label="Not for me" danger>
           <EyeOff size={21} />
         </RailButton>
       </div>
@@ -161,6 +220,16 @@ function FeedCard({
             </p>
           )}
         </div>
+      </div>
+
+      {/* Told once, on the first card only, then never again. */}
+      {index === 0 && active && !saved && (
+        <p className="pointer-events-none absolute inset-x-0 z-20 text-center text-[11px]
+                      text-white/45"
+           style={{ bottom: 'calc(env(safe-area-inset-bottom) + 4.4rem)' }}>
+          swipe right to save · left to pass
+        </p>
+      )}
       </div>
     </section>
   );

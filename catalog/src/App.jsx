@@ -12,13 +12,14 @@ import { fetchShow } from './lib/tvmaze.js';
 import { loadCatalogue } from './lib/catalogue.js';
 import { buildIdf } from './lib/taste.js';
 import { buildKinship } from './lib/kinship.js';
-import { rankCatalogue, rankTogetherCatalogue, appetiteOf } from './lib/rank.js';
+import { rankCatalogue, rankTogetherCatalogue, appetiteOf, describeCommonGround } from './lib/rank.js';
 import { REPRESENTATION, ENDINGS, CONTENT } from './data/curated.js';
 import { refresh } from './lib/api.js';
 import { useStore, providerChanges, getRaw, view, TOGETHER } from './lib/store.js';
 import { buildTaste } from './lib/taste.js';
 import { installSync } from './lib/sync.js';
 import ProfileBar from './components/ProfileBar.jsx';
+import UndoToast from './components/UndoToast.jsx';
 
 /**
  * The shell. Tab state lives here; each screen owns its own data.
@@ -162,25 +163,54 @@ export default function App() {
     state.isTogether ? 'together' : 'solo',
     pool.length,
     showsByKey.size,
-    Object.keys(state.saved).length,
-    Object.keys(state.notForMe).length,
     Object.keys(state.watched).length,
     JSON.stringify(state.taste?.explicit || {}),
-    // In Together the other people's lists change the answer too.
-    (state.others || []).map(o =>
-      `${o.id}:${Object.keys(o.saved || {}).length}:${Object.keys(o.notForMe || {}).length}`).join(','),
     reshuffle,
-  ].join('|'), [state, pool.length, showsByKey.size, reshuffle]);
+    // Kinship arrives asynchronously and is genuinely new information rather
+    // than something you just told it, so it earns a rebuild.
+    kinship.size,
+  ].join('|'), [state, pool.length, showsByKey.size, reshuffle, kinship.size]);
+
+  /**
+   * Swipes are deliberately NOT in orderKey.
+   *
+   * Every save and hide teaches the model something, and rebuilding the order
+   * on each one reshuffles the deck under your thumb — a hidden card is
+   * removed by the visible filter anyway, so the re-rank buys nothing and
+   * costs everything. Worse, undoing a hide re-ranked the feed and the show
+   * you just rescued did not come back: it had picked up a seen-fatigue
+   * penalty and dropped three hundred places.
+   *
+   * So the order holds while you swipe, and what you taught it lands on the
+   * next rebuild — a refresh, a profile switch, or the prompt below once you
+   * have taught it enough to be worth re-reading.
+   */
+  const learnedSince = useMemo(
+    () => Object.keys(state.saved).length + Object.keys(state.notForMe).length,
+    [state.saved, state.notForMe],
+  );
+  const [learnedAtBuild, setLearnedAtBuild] = useState(0);
+  const pendingLessons = Math.max(0, learnedSince - learnedAtBuild);
 
   const [ranked, setRanked] = useState([]);
+
+  /**
+   * The ranker reads these, but a change to them must not itself rebuild the
+   * order — taste is derived from saved and hidden, so listing it as a
+   * dependency put every swipe straight back into reshuffling the feed by the
+   * back door. Refs keep the values current and the rebuild explicit.
+   */
+  const live = useRef({ taste, kinship, appetite, languages });
+  live.current = { taste, kinship, appetite, languages };
 
   useEffect(() => {
     if (!pool.length) { setRanked([]); return; }
     const s = getRaw();
     const v = view(s);
+    const { taste: t, kinship: k, appetite: a, languages: langs } = live.current;
     const shared = {
       seen: v.seen, notForMe: v.notForMe, watched: v.watched,
-      hideUnavailable: v.hideUnavailable, languages,
+      hideUnavailable: v.hideUnavailable, languages: langs,
       // Providers are only known for shows the feed has already enriched, so
       // this is a bonus where we have it rather than a filter we pretend to.
       availabilityFor: () => ({ known: false, onMine: [] }),
@@ -190,22 +220,33 @@ export default function App() {
       const people = (v.others || []).map(p => ({
         id: p.id, name: p.name,
         taste: buildTaste(p, showsByKey),
-        kinship,
+        kinship: k,
         appetite: appetiteOf(p, showsByKey),
       }));
       setRanked(rankTogetherCatalogue(pool, people, shared)
         .map(r => ({ ...r.show, _why: r.reason, _terms: r.terms,
                      _warnings: r.warnings, _confidence: r.confidence })));
+      setLearnedAtBuild(Object.keys(v.saved).length + Object.keys(v.notForMe).length);
       return;
     }
 
-    setRanked(rankCatalogue(pool, { ...shared, taste, kinship, appetite })
+    setRanked(rankCatalogue(pool, { ...shared, taste: t, kinship: k, appetite: a })
       .map(r => ({ ...r.show, _why: r.reason, _terms: r.terms, _warnings: r.warnings,
                    _confidence: r.confidence, _explore: r.explore })));
-    // orderKey is the list of things that may legitimately reorder the feed;
-    // `seen` is deliberately not one of them. See the note above it.
+    setLearnedAtBuild(Object.keys(v.saved).length + Object.keys(v.notForMe).length);
+    // orderKey is the complete list of things that may reorder the feed.
+    // Everything else the ranker needs is read from `live` at build time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderKey, pool, showsByKey, taste, kinship, appetite, languages]);
+  }, [orderKey, pool, showsByKey]);
+
+  /** Where the two of you agree, and where you do not. Only in Together. */
+  const household = useMemo(() => {
+    if (!state.isTogether) return null;
+    const people = (state.others || []).map(p => ({
+      name: p.name, taste: buildTaste(p, showsByKey),
+    }));
+    return { ...describeCommonGround(people), names: people.map(p => p.name) };
+  }, [state.isTogether, state.others, showsByKey]);
 
   const changes = providerChanges(state);
   const leavingCount = changes.filter(c => c.saved && c.lost.length).length;
@@ -225,10 +266,13 @@ export default function App() {
           <FeedScreen
             shows={ranked} meta={poolMeta} loading={loading}
             onOpen={openDetail} onRefresh={hardRefresh}
+            pendingLessons={pendingLessons}
+            onRerank={() => setReshuffle(n => n + 1)}
           />
         )}
         {tab === 'tonight' && (
-          <TonightScreen pool={pool} ranked={ranked} taste={taste} onOpen={openDetail} />
+          <TonightScreen pool={pool} ranked={ranked} taste={taste} onOpen={openDetail}
+                         household={household} />
         )}
         {tab === 'mine' && (
           <MineScreen pool={pool} onOpen={openDetail} changes={changes} taste={taste}
@@ -237,6 +281,8 @@ export default function App() {
         {tab === 'news' && <NewsScreen />}
         {tab === 'search' && <SearchScreen onOpen={openDetail} catalogue={pool} />}
       </main>
+
+      <UndoToast />
 
       <BottomNav tab={tab} onChange={setTab} badge={{ mine: leavingCount }} />
 
@@ -256,7 +302,7 @@ export default function App() {
       </Sheet>
 
       <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings" peek={0.9}>
-        <SettingsScreen onClose={() => setSettingsOpen(false)} />
+        <SettingsScreen onClose={() => setSettingsOpen(false)} taste={taste} />
       </Sheet>
     </div>
   );

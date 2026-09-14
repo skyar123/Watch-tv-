@@ -29,10 +29,12 @@
  *     has two. Collaborative filtering is not available here, so authorship
  *     kinship stands in for it — weaker on breadth, stronger on explanation.
  */
-import { scoreShow as tasteScore, featuresOf } from './taste.js';
+import { scoreShow as tasteScore } from './taste.js';
 import { kinshipReason } from './kinship.js';
 import { totalTime, regular, cliffhangerRisk, shapeOfShow } from './derive.js';
 import { getEnding } from '../data/curated.js';
+import { sessionPenalty } from './session.js';
+import { featuresOf, prettyFeature } from './taste.js';
 
 /* ─────────────────────────────────────────────────────── commitment ───── */
 
@@ -214,6 +216,15 @@ export function scoreCandidate(show, ctx) {
     warnings.push(ending.why);
   }
 
+  // 6b. Mood, as distinct from taste. A run of hides right now outweighs a
+  //     general preference, and it is deliberately not learned — see
+  //     lib/session.js for why an evening's mood must not become a profile.
+  const mood = sessionPenalty(featuresOf(show));
+  if (mood) {
+    terms.push(term('not tonight', mood.penalty,
+      `${prettyFeature(mood.feature)} — ${mood.why}`));
+  }
+
   // 7. Fatigue — you have scrolled past this recently.
   if (ctx.seen?.[show.key] && Date.now() - ctx.seen[show.key] < 86400000) {
     terms.push(term('seen recently', -3.5, 'you scrolled past this today'));
@@ -334,6 +345,7 @@ export function rankCatalogue(candidates, ctx, { limit = 400, exploreEvery = 7 }
  * summing hides exactly that. Netflix has profiles; it does not have this.
  */
 export function rankTogetherCatalogue(candidates, people, ctx, { limit = 400 } = {}) {
+  const common = commonGround(people);
   const scored = [];
   for (const show of candidates) {
     if (ctx.notForMe?.[show.key]) continue;
@@ -345,15 +357,30 @@ export function rankTogetherCatalogue(candidates, people, ctx, { limit = 400 } =
     const scores = per.map(x => x.s.total);
     const worst = Math.min(...scores);
     const spread = Math.max(...scores) - worst;
+
+    // Shared ground is worth more than the sum of two separate enthusiasms:
+    // a thing you BOTH already like is the actual answer to "what do we watch".
+    const feats = featuresOf(show);
+    const agree = feats.filter(f => common.agreed.has(f));
+    const clash = feats.filter(f => common.contested.has(f));
+
     scored.push({
       show, per,
-      // Flattened for the UI, which renders one breakdown either way.
-      terms: per.flatMap(x => x.s.terms.map(t => ({ ...t, person: x.person.name }))),
-      // Weighted to the person who wants it least, and penalised when you are
-      // far apart, because "one of us will be bored" is the real failure mode.
-      total: worst * 2 + scores.reduce((a, b) => a + b, 0) * 0.4 - spread * 0.3,
+      terms: [
+        ...per.flatMap(x => x.s.terms.map(t => ({ ...t, person: x.person.name }))),
+        ...(agree.length ? [{ name: 'you both like', value: +(agree.length * 1.8).toFixed(2),
+          why: `${agree.slice(0, 2).map(prettyFeature).join(' and ')} — you both do` }] : []),
+        ...(clash.length ? [{ name: 'you disagree', value: -(clash.length * 1.5).toFixed(2),
+          why: `${clash.slice(0, 2).map(prettyFeature).join(' and ')} — one of you likes this, the other does not` }] : []),
+      ],
+      // Weighted to whoever wants it least, and penalised when you are far
+      // apart, because "one of us will be bored" is the real failure mode.
+      total: worst * 2 + scores.reduce((a, b) => a + b, 0) * 0.4 - spread * 0.3
+             + agree.length * 1.8 - clash.length * 1.5,
       warnings: [...new Set(per.flatMap(x => x.s.warnings))],
-      reason: togetherHeadline(per),
+      agree: agree.map(prettyFeature),
+      clash: clash.map(prettyFeature),
+      reason: togetherHeadline(per, agree, clash),
       confidence: per.every(x => x.s.confidence === 'good') ? 'good'
                 : per.some(x => x.s.confidence === 'guessing') ? 'guessing' : 'thin',
     });
@@ -361,7 +388,44 @@ export function rankTogetherCatalogue(candidates, people, ctx, { limit = 400 } =
   return scored.sort((a, b) => b.total - a.total).slice(0, limit);
 }
 
-function togetherHeadline(per) {
+/**
+ * Where two people's tastes meet, and where they collide.
+ *
+ * This is the thing Netflix has no concept of. It has profiles, and profiles
+ * never speak to each other; there is no model of a household, so there is no
+ * way to say "you disagree about horror". Knowing that is more useful than any
+ * single recommendation, because it explains the evenings that go wrong.
+ */
+export function commonGround(people, threshold = 0.5) {
+  const agreed = new Set(), contested = new Set();
+  if (people.length < 2) return { agreed, contested };
+  const all = new Set(people.flatMap(p => Object.keys(p.taste?.weights || {})));
+  for (const f of all) {
+    const ws = people.map(p => p.taste?.weights?.[f] ?? 0);
+    if (ws.every(w => w >= threshold)) agreed.add(f);
+    // A real clash: one of you clearly likes it and another clearly does not.
+    else if (Math.max(...ws) >= threshold && Math.min(...ws) <= -threshold) contested.add(f);
+  }
+  return { agreed, contested };
+}
+
+/** A readable summary of the household, for the Together screen. */
+export function describeCommonGround(people) {
+  const { agreed, contested } = commonGround(people);
+  const rank = f => Math.min(...people.map(p => Math.abs(p.taste?.weights?.[f] ?? 0)));
+  const top = set => [...set].sort((a, b) => rank(b) - rank(a)).slice(0, 4).map(prettyFeature);
+  return {
+    agreed: top(agreed),
+    contested: top(contested),
+    enough: people.every(p => (p.taste?.sampleSize ?? 0) >= 4),
+  };
+}
+
+function togetherHeadline(per, agree = [], clash = []) {
+  if (agree.length) {
+    return `You both like ${agree.slice(0, 2).map(prettyFeature).join(' and ')}.` +
+           (clash.length ? ` (You differ on ${prettyFeature(clash[0])}.)` : '');
+  }
   const bits = per.map(x => {
     const top = x.s.terms.find(t => t.value > 0.5 && t.why);
     return top ? `${x.person.name}: ${top.why}` : `${x.person.name}: nothing either way yet`;

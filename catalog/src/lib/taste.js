@@ -1,63 +1,58 @@
 /**
- * What each person actually likes, learned from what they do.
+ * What each person likes, learned contrastively from what they keep and what
+ * they throw away.
  *
- * The rule this file inherits from the rest of the app: a score on its own is
- * worthless. Every weight here can be traced back to specific shows, and
- * `explain()` returns the shows that produced it, so the feed can say
- * "because you saved Dark, Severance and Fringe" rather than "97% match".
+ * THE MODEL, AND WHY IT CHANGED
  *
- * Signals, strongest to weakest:
- *   finished a show   +3   the strongest thing you can say about taste
- *   saved a show      +2
- *   started a show    +1
- *   hid a show        -3   an explicit no, and it should sting
+ * The first version summed weights: +3 per feature of a finished show, -3 per
+ * feature of a hidden one. That breaks the moment swiping makes hiding cheap.
+ * If you like four dramas and hide four dramas, an additive model lands near
+ * zero by coincidence and treats "drama" as mildly irrelevant — but it cannot
+ * tell that case apart from "drama has never come up". Worse, a feature on 40%
+ * of television accumulates weight from sheer frequency.
  *
- * Features are only the ones the data actually has: genre, runtime band, era,
- * network, status, and the hand-checked representation tags.
+ * This is a Naive Bayes log-likelihood ratio instead:
+ *
+ *     score(f) = log( P(f | you liked it) / P(f | you hid it) )
+ *
+ * with Laplace smoothing. It answers the right question — does this feature
+ * DISTINGUISH what you keep from what you throw away — and it has the property
+ * the additive model lacked: a feature that appears equally in both scores
+ * exactly zero, and says so, because it genuinely tells us nothing about you.
+ *
+ * Three refinements on top, all of which matter with swipe-rate data:
+ *   • recency, because taste drifts and a swipe from March is not a swipe today
+ *   • per-feature confidence, so one sighting cannot dominate
+ *   • catalogue rarity, so a distinguishing feature that is also rare counts
+ *     for more than a distinguishing feature everyone shares
  */
 import { regular } from './derive.js';
 import { getRepresentation } from '../data/curated.js';
 
-const SIGNAL = { finished: 3, saved: 2, started: 1, hidden: -3 };
-
 /**
- * How much a shared feature actually tells you.
+ * How strong a piece of evidence each action is.
  *
- * "Drama" is on roughly 40% of the catalogue, so two shows sharing it is
- * almost no information — and yet an untreated model gave it the same weight
- * as sharing "Science-Fiction" or a network. The result was that anyone who
- * had watched two dramas got recommended the highest-rated dramas in
- * existence: Holocaust and Band of Brothers to someone who had just watched
- * Heartstopper and The Bear.
- *
- * This is inverse document frequency over the real catalogue, which the app
- * now has all 27,590 rows of. A feature shared by half of television is worth
- * almost nothing; a feature shared by 1% is worth a great deal.
+ * Swiping made hiding a flick of the thumb, so a hide is no longer the
+ * considered act it was when it took two taps. It is still the clearest
+ * negative available, but it is weighted below finishing something, which
+ * takes hours.
  */
-let IDF = null;
+export const SIGNAL = {
+  finished: 3,     // you gave it your evenings
+  saved: 1.6,      // you meant to
+  liked: 1.6,      // swiped right
+  started: 0.8,    // you at least pressed play
+  hidden: 2.2,     // swiped left, or "not for me"
+};
 
-export function buildIdf(catalogue) {
-  const df = new Map();
-  for (const show of catalogue) {
-    for (const f of featuresOf(show)) df.set(f, (df.get(f) || 0) + 1);
-  }
-  const N = catalogue.length || 1;
-  const idf = new Map();
-  for (const [f, n] of df) {
-    // Clamped: a feature seen once should not be worth ten times a good one.
-    idf.set(f, Math.min(3.2, Math.max(0.25, Math.log(N / (1 + n)))));
-  }
-  IDF = idf;
-  return idf;
-}
+/** Taste drifts. A signal is worth half as much after two months. */
+const HALF_LIFE_DAYS = 60;
+const recency = (at, now) => {
+  if (!at) return 1;
+  const days = (now - at) / 86400000;
+  return Math.pow(0.5, Math.max(0, days) / HALF_LIFE_DAYS);
+};
 
-/** 1 until a catalogue has been seen, so the model still works cold. */
-export const idfOf = f => IDF?.get(f) ?? 1;
-
-/** Exposed for the tests and the "why" panel. */
-export const idfTable = () => IDF;
-
-/** Runtime buckets, because "43 minutes" and "45 minutes" are the same taste. */
 export function runtimeBand(mins) {
   if (mins == null) return null;
   if (mins <= 20) return 'very short';
@@ -85,35 +80,59 @@ export function featuresOf(show) {
   if (eb) f.push(`era:${eb}`);
   if (show.network) f.push(`network:${show.network}`);
   if (show.status?.key) f.push(`status:${show.status.key}`);
-  // Without this the ranked feed filled with Spanish-language telenovelas that
-  // matched on genre and runtime alone. Language is a taste, and TVmaze knows it.
   if (show.language) f.push(`lang:${show.language}`);
+  if (show.type && show.type !== 'Scripted') f.push(`kind:${show.type}`);
   const rep = getRepresentation(show.tvmazeId);
   if (rep?.queer) f.push('rep:queer');
   if (rep?.disability) f.push('rep:disability');
   return f;
 }
 
-/**
- * Build a taste profile from what this person has done.
- * @returns {{weights:Object, evidence:Object, counts:Object, sampleSize:number}}
- */
-export function buildTaste(profileView, showsByKey) {
-  const weights = {};      // feature -> score
-  const evidence = {};     // feature -> [show names that produced it]
-  const counts = { finished: 0, saved: 0, started: 0, hidden: 0 };
+/* ─────────────────────────────────────── catalogue-level feature rarity ── */
 
-  const add = (show, signal) => {
-    const base = SIGNAL[signal];
+let IDF = null;
+
+export function buildIdf(catalogue) {
+  const df = new Map();
+  for (const show of catalogue) for (const f of featuresOf(show)) df.set(f, (df.get(f) || 0) + 1);
+  const N = catalogue.length || 1;
+  const idf = new Map();
+  for (const [f, n] of df) idf.set(f, Math.min(3.2, Math.max(0.25, Math.log(N / (1 + n)))));
+  IDF = idf;
+  return idf;
+}
+export const idfOf = f => IDF?.get(f) ?? 1;
+export const idfTable = () => IDF;
+
+/* ──────────────────────────────────────────────────────── the profile ──── */
+
+const LAPLACE = 0.6;
+
+/**
+ * Build a taste profile from everything this person has done.
+ *
+ * @returns {{weights, evidence, counts, sampleSize, pos, neg, split}}
+ */
+export function buildTaste(profileView, showsByKey, now = Date.now()) {
+  // Weighted feature counts, kept separately for liked and hidden so the ratio
+  // can be taken. This separation IS the model.
+  const likeF = new Map(), hideF = new Map();
+  const evidence = {}, against = {};
+  let likeTotal = 0, hideTotal = 0;
+  const counts = { finished: 0, saved: 0, liked: 0, started: 0, hidden: 0 };
+
+  const record = (show, signal, at) => {
+    const w = SIGNAL[signal] * recency(at, now);
+    if (!(w > 0)) return;
     counts[signal]++;
+    const positive = signal !== 'hidden';
+    const bucket = positive ? likeF : hideF;
+    if (positive) likeTotal += w; else hideTotal += w;
     for (const f of featuresOf(show)) {
-      // Scaled by how rare the feature is, so sharing "Drama" counts for a
-      // fraction of what sharing "Science-Fiction" or a network counts for.
-      weights[f] = (weights[f] || 0) + base * idfOf(f);
-      if (base > 0) {
-        (evidence[f] ||= []);
-        if (!evidence[f].includes(show.name)) evidence[f].push(show.name);
-      }
+      bucket.set(f, (bucket.get(f) || 0) + w);
+      const store = positive ? evidence : against;
+      (store[f] ||= []);
+      if (!store[f].includes(show.name)) store[f].push(show.name);
     }
   };
 
@@ -122,71 +141,96 @@ export function buildTaste(profileView, showsByKey) {
     if (!show) continue;
     const eps = regular(show.episodes);
     const done = Object.keys(watchedEps).length;
-    if (!eps.length || !done) continue;
-    add(show, done / eps.length >= 0.9 ? 'finished' : 'started');
+    if (!done) continue;
+    const at = Math.max(...Object.values(watchedEps).filter(Number.isFinite), 0) || null;
+    if (!eps.length) { record(show, 'started', at); continue; }
+    record(show, done / eps.length >= 0.9 ? 'finished' : 'started', at);
   }
-  for (const key of Object.keys(profileView.saved || {})) {
+  for (const [key, meta] of Object.entries(profileView.saved || {})) {
     const show = showsByKey.get(key);
-    if (show) add(show, 'saved');
+    if (show) record(show, meta?.viaSwipe ? 'liked' : 'saved', meta?.addedAt);
   }
-  for (const key of Object.keys(profileView.notForMe || {})) {
+  for (const [key, at] of Object.entries(profileView.notForMe || {})) {
     const show = showsByKey.get(key);
-    if (show) add(show, 'hidden');
+    if (show) record(show, 'hidden', typeof at === 'number' ? at : null);
   }
 
-  // Explicit switches from Settings, weighted as strongly as a finished show
-  // because saying it out loud should count for at least as much as doing it.
+  const weights = {};
+  const seen = new Set([...likeF.keys(), ...hideF.keys()]);
+  for (const f of seen) {
+    const l = likeF.get(f) || 0;
+    const h = hideF.get(f) || 0;
+
+    // P(feature | liked) over P(feature | hidden), smoothed so a feature
+    // absent from one side does not produce an infinity.
+    const pLike = (l + LAPLACE) / (likeTotal + 2 * LAPLACE);
+    const pHide = (h + LAPLACE) / (hideTotal + 2 * LAPLACE);
+    const logOdds = Math.log(pLike / pHide);
+
+    // One sighting is a hint, four is a pattern. Without this a single swipe
+    // on an unusual network would outrank everything you have ever finished.
+    const support = Math.min(1, (l + h) / 4);
+
+    // A feature that both distinguishes you AND is rare across television is
+    // worth more than one that distinguishes you but everyone shares.
+    const rarity = 0.55 + Math.min(1, idfOf(f) / 3) * 0.45;
+
+    weights[f] = logOdds * support * rarity * 3;
+  }
+
+  // Said out loud in Settings. Not discounted for being common, and not
+  // subject to the like/hide ratio, because you asserted it directly.
   for (const [feature, on] of Object.entries(profileView.taste?.explicit || {})) {
     if (!on) continue;
-    // Said out loud, so it is not discounted for being a common feature.
-    weights[feature] = (weights[feature] || 0) + 3 * Math.max(1.5, idfOf(feature));
+    weights[feature] = (weights[feature] || 0) + 2.4;
     (evidence[feature] ||= []).push('you set this yourself');
   }
 
-  const sampleSize = counts.finished + counts.saved + counts.started + counts.hidden;
-  return { weights, evidence, counts, sampleSize };
+  const sampleSize = counts.finished + counts.saved + counts.liked + counts.started + counts.hidden;
+  return {
+    weights, evidence, against, counts, sampleSize,
+    pos: likeTotal, neg: hideTotal,
+    // Whether there is enough of BOTH to contrast. All likes and no hides is
+    // a much weaker profile than an even split, and the UI should say so.
+    split: Math.min(likeTotal, hideTotal) / Math.max(1, likeTotal + hideTotal),
+  };
 }
 
 /**
- * Score a candidate show against a taste profile.
- *
- * Returns the matched features and the shows behind them, never a bare number.
- * Confidence is explicit and honest: below a handful of signals this is
- * guessing, and it says so.
+ * Score a candidate. Returns matched and opposing features with the shows
+ * behind them, never a bare number.
  */
 export function scoreShow(show, taste) {
   if (!taste || taste.sampleSize === 0) {
-    return { score: 0, matched: [], against: [], confidence: 'none',
-             reason: null, because: [] };
+    return { score: 0, matched: [], against: [], confidence: 'none', reason: null, because: [] };
   }
-  const matched = [];
-  const against = [];
+  const matched = [], opposed = [];
   let score = 0;
 
   for (const f of featuresOf(show)) {
     const w = taste.weights[f];
-    if (!w) continue;
+    if (!w || Math.abs(w) < 0.05) continue;
     score += w;
-    (w > 0 ? matched : against).push({ feature: f, weight: w, from: taste.evidence[f] || [] });
+    (w > 0 ? matched : opposed).push({
+      feature: f, weight: w,
+      from: (w > 0 ? taste.evidence[f] : taste.against[f]) || [],
+    });
   }
   matched.sort((a, b) => b.weight - a.weight);
-  against.sort((a, b) => a.weight - b.weight);
+  opposed.sort((a, b) => a.weight - b.weight);
 
-  const confidence = taste.sampleSize >= 12 ? 'good'
-                   : taste.sampleSize >= 5  ? 'thin'
+  const confidence = taste.sampleSize >= 12 && taste.split > 0.15 ? 'good'
+                   : taste.sampleSize >= 5 ? 'thin'
                    : 'guessing';
 
-  // The shows that most drove this match, named.
   const because = [...new Set(matched.slice(0, 3).flatMap(m => m.from))].slice(0, 3);
-
-  return { score, matched, against, confidence, because, reason: phrase(matched, against, because) };
+  return {
+    score, matched, against: opposed, confidence, because,
+    reason: phrase(matched, opposed, because),
+  };
 }
 
-const LABEL = {
-  genre: '', length: '', era: '', network: 'on ', status: '', rep: '',
-};
-
-function pretty(feature) {
+export function prettyFeature(feature) {
   const [kind, ...rest] = feature.split(':');
   const val = rest.join(':');
   if (kind === 'genre')   return val.toLowerCase();
@@ -194,92 +238,51 @@ function pretty(feature) {
   if (kind === 'era')     return val === 'recent' ? 'recent' : `from ${val}`;
   if (kind === 'network') return `on ${val}`;
   if (kind === 'status')  return val === 'ended' ? 'finished' : val;
-  if (kind === 'rep')     return val === 'queer' ? 'queer stories' : 'disability representation';
   if (kind === 'lang')    return `in ${val}`;
+  if (kind === 'kind')    return val.toLowerCase();
+  if (kind === 'rep')     return val === 'queer' ? 'queer stories' : 'disability representation';
   return val;
 }
 
-function phrase(matched, against, because) {
-  if (!matched.length) return null;
-  const top = matched.slice(0, 2).map(m => pretty(m.feature));
-  let s = `${top.join(' and ')}`;
-  if (because.length) {
-    const names = because.filter(b => b !== 'you set this yourself');
-    if (names.length) {
-      s += ` — like ${names.slice(0, 2).join(' and ')}`;
-    } else {
-      s += ' — you asked for these';
+function phrase(matched, opposed, because) {
+  if (!matched.length) {
+    if (opposed.length) {
+      const names = opposed[0].from.slice(0, 2);
+      return `Close to ${prettyFeature(opposed[0].feature)}, which you have passed on` +
+             (names.length ? ` — ${names.join(' and ')}` : '');
     }
+    return null;
   }
-  if (against.length) {
-    s += `, though you have passed on ${pretty(against[0].feature)} before`;
+  const top = matched.slice(0, 2).map(m => prettyFeature(m.feature));
+  let s = top.join(' and ');
+  const names = because.filter(b => b !== 'you set this yourself');
+  if (names.length) s += ` — like ${names.slice(0, 2).join(' and ')}`;
+  else if (because.length) s += ' — you asked for these';
+  if (opposed.length && opposed[0].weight < -0.4) {
+    s += `, though you have passed on ${prettyFeature(opposed[0].feature)}`;
   }
   return s;
 }
 
 /**
- * Rank a pool for one person. Ordering is taste first, then TVmaze's own
- * popularity as the tiebreak — a cold profile therefore still opens on
- * something worth looking at rather than on nothing.
+ * What the model currently believes, for the Settings panel. Being able to
+ * read your own profile — and see what it has decided it does NOT know — is
+ * the difference between a recommender you can correct and one you cannot.
  */
-export function rankForTaste(pool, taste, { seen = {}, notForMe = {} } = {}) {
-  const now = Date.now();
-  return pool
-    .filter(s => !notForMe[s.key])
-    .map(show => {
-      const t = scoreShow(show, taste);
-      const popularity = (show.weight ?? 0) / 100 + (show.rating ?? 0) / 10;
-      // Something scrolled past in the last day drops, so the feed moves on.
-      const fatigue = seen[show.key] && now - seen[show.key] < 86400000 ? -4 : 0;
-      return { show, taste: t, total: t.score * 1.5 + popularity + fatigue };
-    })
-    .sort((a, b) => b.total - a.total);
+export function explainTaste(taste, limit = 6) {
+  const rows = Object.entries(taste.weights || {})
+    .filter(([, w]) => Math.abs(w) >= 0.2)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  return {
+    likes: rows.filter(([, w]) => w > 0).slice(0, limit)
+      .map(([f, w]) => ({ feature: f, label: prettyFeature(f), weight: +w.toFixed(2),
+                          from: (taste.evidence[f] || []).slice(0, 3) })),
+    dislikes: rows.filter(([, w]) => w < 0).slice(0, limit)
+      .map(([f, w]) => ({ feature: f, label: prettyFeature(f), weight: +w.toFixed(2),
+                          from: (taste.against[f] || []).slice(0, 3) })),
+    // Features it has seen on both sides, which is a real finding worth saying.
+    neutral: Object.keys(taste.evidence || {})
+      .filter(f => (taste.against?.[f]?.length) && Math.abs(taste.weights[f] || 0) < 0.2)
+      .slice(0, 4).map(f => ({ feature: f, label: prettyFeature(f) })),
+  };
 }
-
-/**
- * Rank for two people at once. A pick has to work for both, and the reason
- * says why for each of them.
- */
-export function rankTogether(pool, people, { seen = {}, notForMe = {}, watched = {} } = {}) {
-  const now = Date.now();
-  return pool
-    .filter(s => !notForMe[s.key])
-    .map(show => {
-      const per = people.map(p => ({ person: p, t: scoreShow(show, p.taste) }));
-      const scores = per.map(x => x.t.score);
-      const both = per.every(x => x.t.score > 0);
-      // The lower of the two matters more than the sum: a show one of you
-      // actively dislikes is a bad night even if the other loves it.
-      const worst = Math.min(...scores);
-      const sum = scores.reduce((a, b) => a + b, 0);
-      const alreadySeen = watched[show.key] ? -3 : 0;
-      const fatigue = seen[show.key] && now - seen[show.key] < 86400000 ? -3 : 0;
-      const popularity = (show.weight ?? 0) / 100 + (show.rating ?? 0) / 10;
-      return {
-        show, per, both, worst,
-        total: worst * 2 + sum * 0.5 + popularity + alreadySeen + fatigue,
-        reason: togetherPhrase(per, both),
-      };
-    })
-    .sort((a, b) => b.total - a.total);
-}
-
-function togetherPhrase(per, both) {
-  const named = per.filter(x => x.t.matched.length);
-  if (!named.length) return 'Nothing in either of your histories points at this one yet.';
-  if (both && named.length === per.length) {
-    const bits = per.map(x => `${x.person.name} likes ${pretty(x.t.matched[0].feature)}`);
-    return `${bits.join(', and ')}.`;
-  }
-  const yes = named[0];
-  const quiet = per.filter(x => !x.t.matched.length).map(x => x.person.name);
-  const cold = per.filter(x => x.t.against.length).map(x => x.person.name);
-  let s = `${yes.person.name} likes ${pretty(yes.t.matched[0].feature)}`;
-  if (quiet.length) s += `; nothing in ${quiet.join(' or ')}'s history either way`;
-  if (cold.length) {
-    s += `; ${cold.join(' and ')} ${cold.length > 1 ? 'have' : 'has'} passed on this kind before`;
-  }
-  return s + '.';
-}
-
-export { pretty as prettyFeature };

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { RefreshCw, Loader2 } from 'lucide-react';
+import { RefreshCw, Loader2, Sparkles } from 'lucide-react';
 import FeedCard from '../components/FeedCard.jsx';
 import { useStore, actions } from '../lib/store.js';
 import ProfileBar from '../components/ProfileBar.jsx';
 import { totalTime } from '../lib/derive.js';
 import { availability } from '../lib/providers.js';
 import { fetchShow } from '../lib/tvmaze.js';
+import { recordSwipe } from '../lib/session.js';
+import { featuresOf } from '../lib/taste.js';
 import { Freshness } from '../components/bits.jsx';
 import { resolveId, fetchTrailer, fetchProviders, fetchShowExtra, backdropUrl } from '../lib/tmdb.js';
 import { getEnding } from '../data/curated.js';
@@ -25,7 +27,8 @@ import { cliffhangerRisk } from '../lib/derive.js';
  *     one you are looking at. Enriching the whole list on load would be dozens
  *     of function calls for shows you will never scroll to.
  */
-export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) {
+export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
+                                    pendingLessons = 0, onRerank }) {
   const containerRef = useRef(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [muted, setMuted] = useState(true);
@@ -213,8 +216,12 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
   }, [activeIdx, visible]);
 
   const handleOpen = useCallback(show => onOpen(show, enrichment[show.key]), [onOpen, enrichment]);
-  const handleSave = useCallback(show => actions.toggleSave(show), []);
+  const handleSave = useCallback((show, opts) => {
+    if (opts?.viaSwipe) { recordSwipe(featuresOf(show), true); actions.save(show, opts); }
+    else actions.toggleSave(show);
+  }, []);
   const handleHide = useCallback(show => {
+    recordSwipe(featuresOf(show), false);
     actions.notForMe(show);
   }, []);
 
@@ -256,14 +263,29 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh }) 
             {meta?.loaded === 'core' && <span className="text-gold"> · loading more</span>}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="tap pointer-events-auto rounded-full glass border border-white/15 text-white"
-          aria-label="Refresh the feed"
-        >
-          <RefreshCw size={17} className={loading ? 'animate-spin' : ''} />
-        </button>
+        <div className="pointer-events-auto flex items-center gap-2">
+          {/* Offered rather than done to you: the feed holds still while you
+              swipe, and you decide when to let it re-read what it learned. */}
+          {pendingLessons >= 4 && (
+            <button
+              type="button"
+              onClick={onRerank}
+              className="tap gap-1.5 rounded-full glass border border-mint/40 px-3
+                         text-[12px] font-medium text-mint active:scale-95"
+            >
+              <Sparkles size={13} />Re-rank
+              <span className="text-mint/70">{pendingLessons}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="tap rounded-full glass border border-white/15 text-white"
+            aria-label="Refresh the feed"
+          >
+            <RefreshCw size={17} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       <div ref={containerRef} className="feed-scroll h-screen-d overflow-y-scroll">

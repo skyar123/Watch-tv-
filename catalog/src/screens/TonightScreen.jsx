@@ -13,7 +13,7 @@ import { HoursChip, StatusBadge, Reason, Unknown } from '../components/bits.jsx'
  * that actually matched in lib/moods.js, so if the reason reads oddly the fix
  * is the predicate, not the copy.
  */
-export default function TonightScreen({ pool, ranked, taste, onOpen }) {
+export default function TonightScreen({ pool, ranked, taste, onOpen, household }) {
   const state = useStore();
   const [mood, setMood] = useState(null);
   const [nonce, setNonce] = useState(0);
@@ -71,6 +71,28 @@ export default function TonightScreen({ pool, ranked, taste, onOpen }) {
             : 'What are you in the mood for? Every pick says why it was picked.'}
         </p>
       </header>
+
+      {household && (household.agreed.length > 0 || household.contested.length > 0) && (
+        <div className="mb-3 rounded-2xl border border-white/10 bg-white/[.03] p-3">
+          {household.agreed.length > 0 && (
+            <p className="text-[12.5px] leading-snug text-haze-200">
+              <span className="text-mint">You both go for</span>{' '}
+              {household.agreed.join(', ')}.
+            </p>
+          )}
+          {household.contested.length > 0 && (
+            <p className="mt-1 text-[12.5px] leading-snug text-haze-200">
+              <span className="text-gold">You disagree about</span>{' '}
+              {household.contested.join(', ')} — picks leaning that way score lower here.
+            </p>
+          )}
+          {!household.enough && (
+            <p className="mt-1 text-[11px] text-haze-400">
+              Both of you need a few more swipes before this is worth much.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         {MOODS.map(m => (

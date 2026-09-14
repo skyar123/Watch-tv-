@@ -5,9 +5,10 @@ import { useStore, actions, getRaw } from '../lib/store.js';
 import { syncNow } from '../lib/sync.js';
 import ProfileBar, { ProfileHint } from '../components/ProfileBar.jsx';
 import { coverage } from '../data/curated.js';
+import { explainTaste } from '../lib/taste.js';
 import { tmdbAvailable } from '../lib/tmdb.js';
 
-export default function SettingsScreen({ onClose }) {
+export default function SettingsScreen({ onClose, taste }) {
   const state = useStore();
   const [imported, setImported] = useState(null);
   const [syncMsg, setSyncMsg] = useState(null);
@@ -201,6 +202,55 @@ export default function SettingsScreen({ onClose }) {
           still see it exists.
         </p>
       </section>
+
+      {taste?.sampleSize > 0 && (() => {
+        const e = explainTaste(taste);
+        return (
+          <section>
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-haze-400">
+              What it thinks {state.name} likes
+            </h3>
+            <p className="mb-2 text-[11.5px] leading-snug text-haze-400">
+              Learned from {taste.sampleSize} signal{taste.sampleSize > 1 ? 's' : ''} —
+              {' '}{taste.counts.finished} finished, {taste.counts.liked + taste.counts.saved} saved,
+              {' '}{taste.counts.hidden} hidden. Being able to read this is the point: if it is
+              wrong, swipe against it and it moves.
+            </p>
+            {e.likes.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {e.likes.map(x => (
+                  <span key={x.feature} className="chip border border-mint/30 bg-mint/10 text-mint"
+                        title={x.from.length ? `from ${x.from.join(', ')}` : ''}>
+                    {x.label}<span className="opacity-60">+{x.weight}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {e.dislikes.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {e.dislikes.map(x => (
+                  <span key={x.feature} className="chip border border-pop/30 bg-pop/10 text-pop-soft"
+                        title={x.from.length ? `from ${x.from.join(', ')}` : ''}>
+                    {x.label}<span className="opacity-60">{x.weight}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {e.neutral.length > 0 && (
+              <p className="text-[11px] leading-snug text-haze-400">
+                It has decided these tell it nothing about you, because you have both kept and
+                thrown away shows that have them: {e.neutral.map(n => n.label).join(', ')}.
+              </p>
+            )}
+            {taste.split < 0.12 && (
+              <p className="mt-1.5 text-[11px] leading-snug text-gold/90">
+                Almost everything here is something you liked. Swiping left teaches it just as
+                much as swiping right, and right now it has little to contrast against.
+              </p>
+            )}
+          </section>
+        );
+      })()}
 
       <section>
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-haze-400">
