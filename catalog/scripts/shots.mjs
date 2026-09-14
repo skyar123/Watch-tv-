@@ -52,15 +52,32 @@ const page = await ctx.newPage();
 const apiStats = await installLiveApiShim(page);
 
 const problems = [];
+/**
+ * Which failures are ours.
+ *
+ * This sandbox reaches the internet only through hosts the shim proxies, so
+ * YouTube embeds and publishers' hotlinked thumbnails cannot load here and
+ * their failures say nothing about the app — it already hides a broken image
+ * and falls back to a still frame. Filtering on the HOST rather than on the
+ * error code keeps that narrow: a connection reset from our own origin is
+ * still a problem and still reported.
+ */
+const UNREACHABLE_HERE = /youtube(-nocookie)?\.com|ytimg\.com|out\.com|advocate\.com|them\.us|variety\.com|hollywoodreporter\.com|tvline\.com|deadline\.com|avclub\.com|polygon\.com|pinknews|lgbtqnation|autostraddle|xtramagazine/i;
+
+page.on('requestfailed', r => {
+  if (UNREACHABLE_HERE.test(r.url())) return;
+  problems.push(`request failed: ${r.failure()?.errorText} ${r.url().slice(0, 90)}`);
+});
 page.on('console', m => {
   const t = m.text();
   // A 503 from /api/tmdb is the correct response on a deploy with no key, and
   // the screenshots are meant to show that state. Not a failure.
   if (m.type() === 'error' && /status of 503/.test(t)) return;
-  // News thumbnails are hotlinked from each publisher, and this sandbox can
-  // only reach hosts the shim proxies. The app already hides an image that
-  // fails to load, so a reset here says nothing about the app.
-  if (m.type() === 'error' && /ERR_CONNECTION_RESET|ERR_NAME_NOT_RESOLVED/.test(t)) return;
+  // The console message for a blocked third-party resource carries no URL, so
+  // it is matched by code; the requestfailed handler above is the one that
+  // actually distinguishes by host.
+  if (m.type() === 'error' &&
+      /ERR_CONNECTION_RESET|ERR_NAME_NOT_RESOLVED|ERR_TOO_MANY_RETRIES|ERR_ABORTED/.test(t)) return;
   if (m.type() === 'error') problems.push(`console: ${t.slice(0, 160)}`);
 });
 page.on('pageerror', e => problems.push(`pageerror: ${e.message.slice(0, 160)}`));
