@@ -3,3 +3,4 @@ dist/
 .netlify/
 *.local
 public/*.json.prev
+.wiki-cache.json

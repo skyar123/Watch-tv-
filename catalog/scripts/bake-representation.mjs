@@ -25,6 +25,13 @@ import { writeFileSync, readFileSync, existsSync, renameSync } from 'node:fs';
 
 const DRY = process.argv.includes('--dry');
 const OUT = 'src/data/representation.json';
+/**
+ * The crawl is slow — hundreds of categories, paced to stay under Wikipedia's
+ * rate limit — and iterating on precision should not mean re-crawling it.
+ * The raw page list is cached so matching and sampling re-run in a second.
+ */
+const CACHE = '.wiki-cache.json';
+const FRESH_MS = 1000 * 60 * 60 * 12;
 const UA = 'tonight-tv/1.0 (personal TV catalogue; github.com/skyar123/Watch-tv-)';
 
 /**
@@ -137,7 +144,24 @@ async function crawl(root, depth, seenCats, pages, trail) {
 
 const collected = {};
 const failures = [];
-for (const [kind, roots] of Object.entries(ROOTS)) {
+
+let cached = null;
+if (existsSync(CACHE) && !process.argv.includes('--recrawl')) {
+  try {
+    const c = JSON.parse(readFileSync(CACHE, 'utf8'));
+    if (Date.now() - new Date(c.at).getTime() < FRESH_MS) cached = c;
+  } catch { /* corrupt cache; crawl again */ }
+}
+
+if (cached) {
+  console.log(`  using cached crawl from ${cached.at} (--recrawl to refresh)`);
+  for (const [kind, rows] of Object.entries(cached.pages)) {
+    collected[kind] = new Map(rows.map(r => [r.title, { title: r.title, cats: new Set(r.cats) }]));
+    console.log(`  ${kind}: ${collected[kind].size} pages`);
+  }
+}
+
+if (!cached) for (const [kind, roots] of Object.entries(ROOTS)) {
   const pages = new Map();
   const seenCats = new Set();
   for (const [root, depth] of roots) {
@@ -148,6 +172,15 @@ for (const [kind, roots] of Object.entries(ROOTS)) {
   console.log(`\r  ${kind}: ${pages.size} pages from ${seenCats.size} categories${' '.repeat(34)}`);
   collected[kind] = pages;
 }
+if (!cached && !failures.length) {
+  writeFileSync(CACHE, JSON.stringify({
+    at: new Date().toISOString(),
+    pages: Object.fromEntries(Object.entries(collected).map(([k, m]) =>
+      [k, [...m.values()].map(p => ({ title: p.title, cats: [...p.cats] }))])),
+  }));
+  console.log(`  cached the crawl to ${CACHE}`);
+}
+
 if (failures.length) {
   // An incomplete crawl written as if complete is the worst outcome here: the
   // filter would silently under-report and look like a short list again.
