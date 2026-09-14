@@ -30,6 +30,10 @@ function FeedCard({
   // Double-tap to like, the gesture everyone already has in their thumbs.
   const lastTap = useRef(0);
   const onCardTap = () => {
+    // A drag ends in a click too. Without this, pulling the feed upwards with
+    // a finger on the artwork opened the detail sheet instead of scrolling,
+    // which made the whole card feel like it was fighting back.
+    if (swipe.wasDrag()) return;
     const now = Date.now();
     if (now - lastTap.current < 280) {
       lastTap.current = 0;

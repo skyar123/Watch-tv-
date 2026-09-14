@@ -108,6 +108,66 @@ check('a mostly-vertical diagonal did not swipe',
   Object.keys(pd.notForMe || {}).length === hiddenBefore,
   `saved ${Object.keys(pd.saved || {}).length}, hidden ${Object.keys(pd.notForMe || {}).length}`);
 
+/**
+ * The angle sweep. This is the test that would have caught the finicky lock.
+ *
+ * Every other check above drives a perfectly horizontal or perfectly vertical
+ * drag, which the broken version passed too: comparing |dx| to |dy| with no
+ * margin is correct at 0 and at 90 degrees. What it got wrong was everything
+ * in between, where a pixel of thumb wobble decided whether a gesture hid a
+ * show or scrolled the feed. So sweep the angles and look at where the
+ * behaviour actually changes.
+ */
+console.log('sweeping gesture angles: which ones swipe, and is the boundary stable?');
+{
+  await page.locator('.feed-scroll').evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+  await page.waitForTimeout(400);
+
+  const R = 230;                       // gesture length, comfortably past COMMIT_PX
+  const results = [];
+  for (const deg of [0, 10, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90]) {
+    const rad = deg * Math.PI / 180;
+    const before = {
+      saved: Object.keys((await profile()).saved || {}).length,
+      hidden: Object.keys((await profile()).notForMe || {}).length,
+    };
+    // Start on the bare part of the card, the same band the explicit swipes
+    // above use. Lower down is the caption block, and a gesture that begins
+    // there reports no swipe at ANY angle, which looks like a broken lock and
+    // is really a test aimed at the wrong pixels.
+    await drag(110, 430, 110 + R * Math.cos(rad), 430 - R * Math.sin(rad), 18, 10);
+    await page.waitForTimeout(650);
+    const now = await profile();
+    const swiped = Object.keys(now.saved || {}).length > before.saved ||
+                   Object.keys(now.notForMe || {}).length > before.hidden;
+    results.push({ deg, swiped });
+    if (swiped) {
+      // Put it back so the next angle starts from the same state.
+      await page.locator('button', { hasText: 'Undo' }).first().click().catch(() => {});
+      await page.waitForTimeout(450);
+    }
+    await page.locator('.feed-scroll').evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+    await page.waitForTimeout(250);
+  }
+
+  console.log('  ' + results.map(r => `${r.deg}${r.swiped ? '✓' : '·'}`).join(' '));
+  const swipedAt = d => results.find(r => r.deg === d)?.swiped;
+  check('a flat horizontal swipe commits', swipedAt(0) === true);
+  check('10 degrees off horizontal still commits', swipedAt(10) === true);
+  check('20 degrees off horizontal still commits', swipedAt(20) === true);
+  check('a 60 degree gesture does not swipe', swipedAt(60) === false);
+  check('a 70 degree gesture does not swipe', swipedAt(70) === false);
+  check('a vertical drag does not swipe', swipedAt(90) === false);
+
+  // The boundary must be ONE crossing. A lock decided by pixel luck produces a
+  // scattered pattern, which is exactly what "finicky" feels like in the hand.
+  const crossings = results.slice(1).filter((r, i) => r.swiped !== results[i].swiped).length;
+  check('the swipe/scroll boundary is a single clean crossing', crossings === 1,
+        `${crossings} crossing(s)`);
+  const boundary = results.find(r => !r.swiped)?.deg;
+  console.log(`  swipe gives way to scroll at about ${boundary} degrees`);
+}
+
 console.log('the card carries an explicit touch-action');
 const ta = await page.locator('.feed-card').first().evaluate(el => getComputedStyle(el).touchAction);
 check('touch-action is pan-y', ta === 'pan-y', ta);

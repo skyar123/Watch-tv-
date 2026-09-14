@@ -292,14 +292,12 @@ export function scoreCandidate(show, ctx) {
   //     this they would have ridden the recency bonus straight to the top.
   const age = ageOf(show, ctx.now);
   if (age?.unaired) {
-    const away = Math.round(-age.months);
     terms.push(term('not out yet', -7,
       age.exact ? `it does not premiere until ${whenItLands(age.date)}`
                 : `it has not aired yet`));
     warnings.push(age.exact
       ? `Not out yet: it premieres ${whenItLands(age.date)}.`
       : `This has not aired yet.`);
-    void away;
   } else if (age) {
     // 2.2 at release, half of that by ten months, gone by three years. It is
     // deliberately smaller than the quality terms: recency is a tilt, not a
