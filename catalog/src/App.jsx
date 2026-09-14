@@ -289,7 +289,9 @@ export default function App() {
                       onSettings={() => setSettingsOpen(true)}
                       onTeach={() => setTeachOpen(true)} />
         )}
-        {tab === 'news' && <NewsScreen />}
+        {/* The catalogue is what lets a story name the show it is about, and
+            openDetail is what makes that name tappable. */}
+        {tab === 'news' && <NewsScreen catalogue={pool} onOpen={openDetail} />}
         {tab === 'search' && <SearchScreen onOpen={openDetail} catalogue={pool} />}
       </main>
 
