@@ -38,7 +38,7 @@ you choose. This is only the choosing part.
 
 | Grid | News about your shows |
 |---|---|
-| ![](shots/grid.png) | ![](shots/news.png) |
+| ![](shots/17-grid.png) | ![](shots/18-news-your-shows.png) |
 
 The feed is the good way to decide and a slow way to look, so there is a 2-up
 grid behind the toggle in the header: six shows a screen instead of one, quick

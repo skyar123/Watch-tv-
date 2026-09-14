@@ -112,7 +112,7 @@ console.log('a saved show collects its own coverage');
   check('only the story about a saved show survives the filter', left === 1, `${left} stories`);
   const chip = await page.locator('button[aria-label*="on your list"]').count();
   check('and it is labelled as being on your list', chip === 1);
-  await page.screenshot({ path: 'docs/shots/news.png' });
+  await page.screenshot({ path: 'shots/18-news-your-shows.png' });
   await page.locator('button', { hasText: 'Everything' }).click();
   await page.waitForTimeout(400);
 }

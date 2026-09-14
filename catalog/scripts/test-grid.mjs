@@ -104,7 +104,7 @@ await page.evaluate(() => {
   el?.scrollTo({ top: 0, behavior: 'instant' });
 });
 await page.waitForTimeout(800);
-await page.screenshot({ path: 'docs/shots/grid.png' });
+await page.screenshot({ path: 'shots/17-grid.png' });
 const header = await page.evaluate(() => {
   const tile = document.querySelector('button[aria-label*="Open in the feed"]');
   // The chip reads "457 shows of 32,138", so match the words, not the end.
