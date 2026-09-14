@@ -79,6 +79,10 @@ export function toShow(raw) {
     backdrop: bestBackdrop(images),
     episodes: eps ? eps.map(toEpisode) : null,
     weight: raw.weight ?? null,
+    // TVmaze still has an episode scheduled: the show is on the air right now.
+    // The baked index carries the same flag, and enriching a card must not
+    // quietly drop it; the ranker reads it either way.
+    airing: Boolean(raw._links?.nextepisode),
     updatedAt: raw.updated ? raw.updated * 1000 : null,
   };
 }

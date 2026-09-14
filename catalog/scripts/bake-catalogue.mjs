@@ -41,9 +41,90 @@ const UA = 'tonight/bake-catalogue';
  * Without the poster the feed has nothing to show; without a rating or a
  * popularity weight there is nothing to rank on, and the index fills with
  * 1970s regional news programmes that push real shows off the list.
+ *
+ * THE RECENCY EXEMPTION, and why it had to exist.
+ *
+ * That rule is a survivorship filter. A rating and a popularity weight are
+ * both things a show ACCUMULATES, so the bar is easy for a show that aired in
+ * 2008 and nearly impossible for one that aired last month. Sampling TVmaze's
+ * newest 2,152 records, 1,158 premiered in the last two years and the rule
+ * kept 204 of them, 79 on a service anyone here subscribes to. The feed was
+ * not old because TVmaze is old. It was old because the filter quietly
+ * required a show to have been around long enough to be voted on.
+ *
+ * So a show that premiered inside the recency window is judged on a lower
+ * popularity bar instead of on a rating it has not had time to earn, or on
+ * having an episode still scheduled, which is TVmaze telling us, factually,
+ * that it is airing right now. On the same sample that takes recent keeps from
+ * 204 to 522 and major-service keeps from 79 to 113, and it is what lets
+ * Heartstopper Forever, Long Story Short and Still Water into the index at all.
+ *
+ * The bar is not zero, because most of what a streamer uploads in a given week
+ * is two-minute vertical drama with a weight of 3 and it would bury everything.
  */
-const KEEP = s => Boolean(s.image?.medium) &&
-  (s.rating?.average != null || (s.weight ?? 0) >= 60);
+const RECENT_MONTHS = 24;
+const RECENT_WEIGHT = 40;
+const recentCutoff = (() => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - RECENT_MONTHS);
+  return d.toISOString().slice(0, 10);
+})();
+
+const isRecent = s => Boolean(s.premiered) && s.premiered >= recentCutoff;
+const airing = s => Boolean(s._links?.nextepisode);   // an episode is still scheduled
+
+const ADMIT = s => Boolean(s.image?.medium) && (
+  s.rating?.average != null ||
+  (s.weight ?? 0) >= 60 ||
+  (isRecent(s) && ((s.weight ?? 0) >= RECENT_WEIGHT || airing(s)))
+);
+
+/**
+ * ADMISSION IS SELECTIVE. MEMBERSHIP IS STICKY. Here is why.
+ *
+ * Re-baking a day after the previous index, with a filter that had only been
+ * LOOSENED, dropped 3,469 shows. Rebelde, Whale Wars, Tim and Eric's Bedtime
+ * Stories, all previously kept on weight alone, all gone. Checking ten of
+ * them against TVmaze directly: Rebelde's weight had gone 90 → 55 overnight,
+ * Whale Wars 87 → 58, Sherlock Holmes 83 → 39. 16,719 of the 24,121 shows in
+ * both bakes had their weight change in a single day.
+ *
+ * TVmaze's `weight` is a rolling popularity measure, recomputed against what
+ * everyone is looking at this week. It is not a property of the show. Hanging
+ * a hard cutoff on it means membership of the catalogue flickers: a show you
+ * saved on Tuesday is not in the index on Wednesday, for a reason that has
+ * nothing to do with the show. Saved lists break, the ranker cannot see it,
+ * and nothing anywhere explains it.
+ *
+ * So the threshold decides who gets IN, and a show that is already in stays
+ * in as long as it still has artwork to put on a card. The index becomes
+ * monotone, which is the property a catalogue should have had all along, and
+ * weight goes back to being what it is good for: a soft ranking signal, where
+ * a thirty-point wobble moves a score a little instead of deleting a show.
+ */
+const previouslyIn = (() => {
+  const ids = new Set();
+  for (const f of [OUT_CORE, OUT]) {
+    if (!existsSync(f)) continue;
+    try { for (const s of JSON.parse(readFileSync(f, 'utf8')).shows) ids.add(s.i); }
+    catch { /* an unreadable previous index just means nothing is sticky yet */ }
+  }
+  return ids;
+})();
+
+let stuck = 0;
+const KEEP = s => {
+  if (ADMIT(s)) return true;
+  if (previouslyIn.has(s.id) && s.image?.medium) { stuck++; return true; }
+  return false;
+};
+
+/** Premiere dates are kept in full for this window; older rows keep the year. */
+const dateFieldCutoff = (() => {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 3);
+  return d.toISOString().slice(0, 10);
+})();
 
 /** Only the fields the ranker and the card actually read. */
 const trim = s => ({
@@ -62,6 +143,13 @@ const trim = s => ({
   // The image path minus the constant prefix; the client puts it back.
   m: s.image.medium.replace('https://static.tvmaze.com/uploads/images/medium_portrait/', ''),
   d: s.externals?.imdb || undefined,
+  // Full premiere date, recent shows only. The year alone cannot tell "out
+  // last month" from "out in eleven weeks", and in September of a given year
+  // a good part of that year's catalogue has not aired yet. Roughly 3% of
+  // rows carry it, so it costs almost nothing on the wire.
+  f: s.premiered && s.premiered >= dateFieldCutoff ? s.premiered : undefined,
+  // TVmaze still has an episode scheduled for this show: it is airing now.
+  a: s._links?.nextepisode ? 1 : undefined,
 });
 
 async function page(n, attempt = 0) {
@@ -107,18 +195,35 @@ console.log(`\r  done: ${seen} shows seen, ${kept.length} kept, ${((Date.now() -
 
 // Rank order is baked in so the client can slice a good core without sorting
 // 50k rows on a phone at startup.
-kept.sort((a, b) => (b.w ?? 0) - (a.w ?? 0) || (b.r ?? 0) - (a.r ?? 0));
+//
+// Sorting on popularity alone put every recent show in the tail, because
+// weight is accumulated too: the core that loads first would have been a
+// museum, and the app would show a back-catalogue feed for the second or two
+// before the tail arrives. So the sort key is popularity plus a recency lift
+// that fades over three years. It changes which FILE a show lands in and
+// nothing else; the ranker still scores every row once both tiers are loaded.
+const thisYear = new Date().getFullYear();
+const recencyLift = s => {
+  const age = thisYear - (s.p ?? 0);
+  if (!s.p || age > 3) return 0;
+  return [22, 16, 9, 4][Math.max(0, age)] ?? 0;
+};
+kept.sort((a, b) =>
+  ((b.w ?? 0) + recencyLift(b)) - ((a.w ?? 0) + recencyLift(a)) || (b.r ?? 0) - (a.r ?? 0));
 
 const bakedAt = new Date().toISOString();
 const meta = {
-  version: 1,
+  version: 2,
   source: 'api.tvmaze.com/shows',
   bakedAt,
   seen,
   // What was deliberately left out, so a missing show is explicable rather
   // than mysterious. Search still queries TVmaze live, so nothing is
   // unreachable — it just is not in the ranking pool.
-  filter: 'has a poster AND (has a rating OR popularity weight >= 60)',
+  filter: `has a poster AND (has a rating OR popularity weight >= 60 OR ` +
+          `(premiered since ${recentCutoff} AND (weight >= ${RECENT_WEIGHT} OR still airing)))` +
+          `, OR it was in the previous index and still has a poster, because` +
+          ` TVmaze's weight moves by 30 points overnight and membership must not`,
   dropped: seen - kept.length,
   note: 'Sorted by TVmaze popularity weight, then rating. Abbreviated fields; see src/lib/catalogue.js.',
 };
@@ -140,6 +245,17 @@ console.log(`  ${Math.round((json.length + coreJson.length) / kept.length)} byte
 const byStatus = kept.reduce((a, s) => (a[s.s] = (a[s.s] || 0) + 1, a), {});
 console.log(`  running ${byStatus[1] || 0} · ended ${byStatus[2] || 0} · tbd ${byStatus[3] || 0}`);
 console.log(`  rated ${kept.filter(s => s.r != null).length} · with runtime ${kept.filter(s => s.t).length}`);
+
+// Prove the recency exemption did what it was added to do, every time this runs.
+const recentKept = kept.filter(s => s.f && s.f >= recentCutoff);
+const unrated = recentKept.filter(s => s.r == null);
+console.log(`  premiered since ${recentCutoff}: ${recentKept.length} ` +
+            `(${unrated.length} of them with no rating yet, the ones the old filter dropped)`);
+console.log(`  still airing (an episode is scheduled): ${kept.filter(s => s.a).length}`);
+console.log(`  held by the stickiness rule (would fail today's bar, were in the index): ${stuck}`);
+const MAJOR = /^(netflix|hbo|hbo max|max|apple tv\+?|disney\+|hulu|prime video|peacock|paramount\+|showtime|starz|fx|amc\+?|bbc (one|two|three|iplayer)|itv1|itvx|channel 4|abc|nbc|cbs|fox|the cw|adult swim|britbox|sky atlantic)$/i;
+console.log(`  of those, on a major service: ${recentKept.filter(s => MAJOR.test(s.c || '')).length}`);
+console.log(`  recent shows landing in the core tier: ${kept.slice(0, CORE_SIZE).filter(s => s.f && s.f >= recentCutoff).length}`);
 
 if (DRY) { console.log('\n--dry: nothing written'); process.exit(0); }
 

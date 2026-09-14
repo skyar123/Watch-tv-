@@ -8,6 +8,13 @@
  *
  * Usage:
  *   node scripts/prove-diff.mjs before.json after.json --expect providers,checkedAt
+ *   node scripts/prove-diff.mjs before.json after.json --key i --expect bakedAt
+ *
+ * --key matters when the script also REORDERS an array. Compared by position,
+ * a re-sorted list of 28,000 shows reports every row as changed and the report
+ * is worthless: it was 9,553 "problems" the first time the bake changed its
+ * sort. With --key, rows are matched by that field, so what gets reported is
+ * what actually happened to each show.
  *
  * Walks BOTH objects key by key, to any depth, and reports every difference
  * split into three buckets:
@@ -26,13 +33,15 @@ if (!beforePath || !afterPath) {
 }
 const expectArg = rest.includes('--expect') ? rest[rest.indexOf('--expect') + 1] : '';
 const expected = expectArg.split(',').map(s => s.trim()).filter(Boolean);
+/** Match array rows by this field instead of by position. */
+const ROW_KEY = rest.includes('--key') ? rest[rest.indexOf('--key') + 1] : null;
 
 const load = p => JSON.parse(readFileSync(p, 'utf8'));
 
 /** A path is expected if it equals, or sits underneath, a declared field. */
 const isExpected = path => expected.some(e => {
   // Array indices are wildcards: "shows.3.providers" matches "shows.providers".
-  const generic = path.replace(/\.\d+(?=\.|$)/g, '');
+  const generic = path.replace(/\.\d+(?=\.|$)/g, '').replace(/\[[^\]]*\]/g, '');
   return generic === e || generic.startsWith(e + '.') ||
          path === e || path.startsWith(e + '.');
 });
@@ -58,6 +67,22 @@ function walk(a, b, path = '') {
   }
 
   if (at === 'array' && bt === 'array') {
+    // Keyed rows: match on identity, so reordering is not a diff.
+    const keyed = ROW_KEY &&
+      a.every(x => x && typeof x === 'object' && ROW_KEY in x) &&
+      b.every(x => x && typeof x === 'object' && ROW_KEY in x);
+    if (keyed) {
+      const A = new Map(a.map(x => [x[ROW_KEY], x]));
+      const B = new Map(b.map(x => [x[ROW_KEY], x]));
+      for (const [k, av] of A) {
+        if (!B.has(k)) diffs.push({ type: 'REMOVED', path: `${path}[${k}]`, from: av, to: undefined });
+        else walk(av, B.get(k), `${path}[${k}]`);
+      }
+      for (const [k, bv] of B) {
+        if (!A.has(k)) diffs.push({ type: 'ADDED', path: `${path}[${k}]`, from: undefined, to: bv });
+      }
+      return;
+    }
     if (a.length !== b.length) {
       diffs.push({ type: a.length > b.length ? 'REMOVED' : 'ADDED',
                    path: `${path}.length`, from: a.length, to: b.length });
@@ -96,12 +121,14 @@ if (ok.length) {
 
 if (removed.length) {
   console.log(C.r(`\n${removed.length} KEY(S) DISAPPEARED — this is the silent-deletion bug`));
-  for (const d of removed) console.log(C.r(`  ${d.path}  was ${show(d.from)}`));
+  for (const d of removed.slice(0, 40)) console.log(C.r(`  ${d.path}  was ${show(d.from)}`));
+  if (removed.length > 40) console.log(C.r(`  …and ${removed.length - 40} more`));
 }
 
 if (unexpected.length) {
   console.log(C.r(`\n${unexpected.length} UNDECLARED change(s)`));
-  for (const d of unexpected) console.log(C.r(`  ${d.type} ${d.path}: ${show(d.from)} → ${show(d.to)}`));
+  for (const d of unexpected.slice(0, 40)) console.log(C.r(`  ${d.type} ${d.path}: ${show(d.from)} → ${show(d.to)}`));
+  if (unexpected.length > 40) console.log(C.r(`  …and ${unexpected.length - 40} more`));
 }
 
 if (!diffs.length) console.log(C.y('identical — the script changed nothing at all'));

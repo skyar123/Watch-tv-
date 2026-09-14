@@ -27,7 +27,10 @@ export function hydrate(r) {
     genres: r.g || [],
     rating: r.r ?? null,
     averageRuntime: r.t ?? null,
-    premiered: r.p ? String(r.p) : null,
+    // Full date when the bake had one (recent shows), otherwise just the year.
+    // Everything downstream reads String(premiered).slice(0, 4) for the year,
+    // which is true of both shapes.
+    premiered: r.f || (r.p ? String(r.p) : null),
     ended: r.e ? String(r.e) : null,
     status: normaliseStatus(STATUS[r.s] || 'Unknown'),
     rawStatus: STATUS[r.s] || 'Unknown',
@@ -38,6 +41,8 @@ export function hydrate(r) {
     poster: IMG + r.m,
     backdrop: null,                     // fetched per show when a card comes into view
     imdbId: r.d || null,
+    // TVmaze has an episode scheduled for it: this is on the air right now.
+    airing: Boolean(r.a),
     summary: '',                        // fetched with the full record on demand
     episodes: null,
     isWeb: false,

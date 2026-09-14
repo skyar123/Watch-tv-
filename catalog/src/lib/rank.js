@@ -68,6 +68,35 @@ export function estimateHours(show, now = Date.now()) {
   };
 }
 
+/* ──────────────────────────────────────────────────────── recency ───── */
+
+/**
+ * How old a show is, in months, and whether it has even aired yet.
+ *
+ * The baked index carries a full premiere date for anything recent and only a
+ * year for the back catalogue, so an unknown month is read as the middle of
+ * its year: that is off by at most six months on a show whose exact age has
+ * stopped mattering, and it never invents precision it does not have.
+ */
+export function ageOf(show, now = Date.now()) {
+  const p = show.premiered;
+  if (!p) return null;
+  const exact = /^\d{4}-\d{2}/.test(String(p));
+  const t = exact ? Date.parse(p) : Date.parse(`${String(p).slice(0, 4)}-07-01`);
+  if (Number.isNaN(t)) return null;
+  const months = (now - t) / (1000 * 60 * 60 * 24 * 30.44);
+  return { months, exact, unaired: months < 0, date: p };
+}
+
+/** Month name for a date we actually have to the day. */
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+const whenItLands = iso => {
+  const d = new Date(iso);
+  const sameYear = d.getUTCFullYear() === new Date().getUTCFullYear();
+  return MONTHS[d.getUTCMonth()] + (sameYear ? '' : ` ${d.getUTCFullYear()}`);
+};
+
 /**
  * How long a show this person actually finishes.
  *
@@ -169,6 +198,21 @@ export function scoreCandidate(show, ctx) {
       w >= 40
         ? `rated ${show.rating.toFixed(1)} on TVmaze`
         : `rated ${show.rating.toFixed(1)}, but by few enough people to be uncertain`));
+  } else {
+    // 3b. Nobody has rated it.
+    //
+    //     This was silently free, and that is how adding a recency bonus put
+    //     "Nation's Dumbest" above Breaking Bad on a cold start. A rating of
+    //     8.8 is worth +2.9 here and a rating of 5.5 is worth a penalty, but
+    //     NO rating scored zero, so an unrated show collected the recency
+    //     bonus with nothing on the other side of the ledger, and 85 of the
+    //     top 100 became unrated 2026 premieres.
+    //
+    //     Unknown is not the same as average, and for an app whose objective
+    //     is satisfaction minus REGRET it is the more expensive of the two.
+    //     Only 36% of the index has a rating at all; the rest is a gamble, and
+    //     the card says so instead of quietly pricing it as a sure thing.
+    terms.push(term('unproven', -1.4, 'nobody has rated it yet'));
   }
   if (show.episodes) {
     const shape = shapeOfShow(show);
@@ -228,6 +272,54 @@ export function scoreCandidate(show, ctx) {
   // 7. Fatigue — you have scrolled past this recently.
   if (ctx.seen?.[show.key] && Date.now() - ctx.seen[show.key] < 86400000) {
     terms.push(term('seen recently', -3.5, 'you scrolled past this today'));
+  }
+
+  // 7b. Recency.
+  //
+  //     There was no term here at all, and the omission was not neutral: every
+  //     other quality signal in this function is something a show ACCUMULATES.
+  //     A rating needs voters, a popularity weight needs viewers, kinship needs
+  //     a body of work. A show released three weeks ago has had no time to earn
+  //     any of them, so a scoring function built only from those terms will
+  //     rank 2008 above 2026 forever, and a cold feed came out 49% pre-2010.
+  //     "What is on now" is a real reason to watch something, and it was the
+  //     one reason the model could not express.
+  //
+  //     Two honest limits on it. It decays to nothing over three years, so it
+  //     is a tilt and not a sort. And a show that has not aired yet gets the
+  //     opposite of a bonus, because "premieres in eleven weeks" is not an
+  //     answer to what to watch tonight. The index carries those, and without
+  //     this they would have ridden the recency bonus straight to the top.
+  const age = ageOf(show, ctx.now);
+  if (age?.unaired) {
+    const away = Math.round(-age.months);
+    terms.push(term('not out yet', -7,
+      age.exact ? `it does not premiere until ${whenItLands(age.date)}`
+                : `it has not aired yet`));
+    warnings.push(age.exact
+      ? `Not out yet: it premieres ${whenItLands(age.date)}.`
+      : `This has not aired yet.`);
+    void away;
+  } else if (age) {
+    // 2.2 at release, half of that by ten months, gone by three years. It is
+    // deliberately smaller than the quality terms: recency is a tilt, not a
+    // sort, and at 3.5 it WAS a sort. See the unproven term above.
+    const lift = 2.2 * Math.exp(-age.months / 14);
+    if (lift > 0.25) {
+      const m = age.months;
+      terms.push(term('new', lift,
+        !age.exact ? `new this year`
+        : m < 1.5 ? 'out in the last few weeks'
+        : m < 7   ? `new, out ${whenItLands(age.date)}`
+        : `fairly new, from ${new Date(age.date).getUTCFullYear()}`));
+    }
+  }
+
+  // 7c. On the air right now. TVmaze has an episode still scheduled for it,
+  //     which is a fact rather than an inference. Worth saying out loud in
+  //     both directions: it is current, and it is not bingeable yet.
+  if (show.airing && !age?.unaired) {
+    terms.push(term('on the air', 0.8, 'new episodes are airing now'));
   }
 
   // 8. Popularity, as a PRIOR that decays.
