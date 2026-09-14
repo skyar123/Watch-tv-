@@ -27,7 +27,7 @@
  *     for more than a distinguishing feature everyone shares
  */
 import { regular } from './derive.js';
-import { getRepresentation } from '../data/curated.js';
+import { getRepresentation } from './representation.js';
 
 /**
  * How strong a piece of evidence each action is.
@@ -38,6 +38,7 @@ import { getRepresentation } from '../data/curated.js';
  * takes hours.
  */
 export const SIGNAL = {
+  loved: 4,        // you told us outright
   finished: 3,     // you gave it your evenings
   saved: 1.6,      // you meant to
   liked: 1.6,      // swiped right
@@ -119,7 +120,7 @@ export function buildTaste(profileView, showsByKey, now = Date.now()) {
   const likeF = new Map(), hideF = new Map();
   const evidence = {}, against = {};
   let likeTotal = 0, hideTotal = 0;
-  const counts = { finished: 0, saved: 0, liked: 0, started: 0, hidden: 0 };
+  const counts = { loved: 0, finished: 0, saved: 0, liked: 0, started: 0, hidden: 0 };
 
   const record = (show, signal, at) => {
     const w = SIGNAL[signal] * recency(at, now);
@@ -139,16 +140,22 @@ export function buildTaste(profileView, showsByKey, now = Date.now()) {
   for (const [key, watchedEps] of Object.entries(profileView.watched || {})) {
     const show = showsByKey.get(key);
     if (!show) continue;
+    const at = Math.max(...Object.values(watchedEps).filter(Number.isFinite), 0) || null;
+    // "__all" means the person told us they have seen the whole thing. That is
+    // a first-class signal and does not need the episode list to be loaded.
+    if (watchedEps.__all) { record(show, 'finished', watchedEps.__all); continue; }
     const eps = regular(show.episodes);
     const done = Object.keys(watchedEps).length;
     if (!done) continue;
-    const at = Math.max(...Object.values(watchedEps).filter(Number.isFinite), 0) || null;
     if (!eps.length) { record(show, 'started', at); continue; }
     record(show, done / eps.length >= 0.9 ? 'finished' : 'started', at);
   }
   for (const [key, meta] of Object.entries(profileView.saved || {})) {
     const show = showsByKey.get(key);
-    if (show) record(show, meta?.viaSwipe ? 'liked' : 'saved', meta?.addedAt);
+    if (!show) continue;
+    // "I loved this" is the clearest thing anyone can tell a recommender, and
+    // it is worth more than a save or a swipe.
+    record(show, meta?.loved ? 'loved' : meta?.viaSwipe ? 'liked' : 'saved', meta?.addedAt);
   }
   for (const [key, at] of Object.entries(profileView.notForMe || {})) {
     const show = showsByKey.get(key);
@@ -186,7 +193,8 @@ export function buildTaste(profileView, showsByKey, now = Date.now()) {
     (evidence[feature] ||= []).push('you set this yourself');
   }
 
-  const sampleSize = counts.finished + counts.saved + counts.liked + counts.started + counts.hidden;
+  const sampleSize = counts.loved + counts.finished + counts.saved + counts.liked +
+                     counts.started + counts.hidden;
   return {
     weights, evidence, against, counts, sampleSize,
     pos: likeTotal, neg: hideTotal,

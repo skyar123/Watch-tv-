@@ -8,7 +8,7 @@ import { coverage } from '../data/curated.js';
 import { explainTaste } from '../lib/taste.js';
 import { tmdbAvailable } from '../lib/tmdb.js';
 
-export default function SettingsScreen({ onClose, taste }) {
+export default function SettingsScreen({ onClose, taste, onTeach }) {
   const state = useStore();
   const [imported, setImported] = useState(null);
   const [syncMsg, setSyncMsg] = useState(null);
@@ -256,6 +256,11 @@ export default function SettingsScreen({ onClose, taste }) {
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-haze-400">
           Tell it what you want more of
         </h3>
+        <button type="button" onClick={onTeach}
+          className="mb-3 tap w-full justify-start gap-2 rounded-xl border border-mint/30
+                     bg-mint/[.08] px-3 text-[13px] text-mint">
+          <Check size={15} />Mark shows you have watched or loved
+        </button>
         <p className="mb-2 text-[11.5px] leading-snug text-haze-400">
           The feed learns from what you save, finish and hide. These switches say
           it out loud, and count as much as finishing a show.

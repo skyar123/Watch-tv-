@@ -11,7 +11,7 @@
  *   totalTime(), seasonStats(), curated representation, curated content.
  */
 import { totalTime, regular, nextUnwatched } from './derive.js';
-import { getRepresentation } from '../data/curated.js';
+import { getRepresentation } from './representation.js';
 import { kidVerdict } from './kidsafe.js';
 
 const has = (show, ...gs) => gs.some(g => (show.genres || []).includes(g));
@@ -58,16 +58,44 @@ export const MOODS = [
   {
     id: 'queer', label: 'Queer stories', emoji: '🏳️‍🌈',
     blurb: 'Characters and plots, not background detail',
-    // Only hand-checked entries. A keyword match cannot tell you a queer
-    // character matters to the plot, and this list is worthless if it can't.
+    /**
+     * Two sources, ranked. A hand-checked note says why the queer storyline
+     * matters; a Wikipedia listing says editors consider the show related.
+     * The first version used only the former, six shows existed, and the
+     * filter returned one result — which is not honesty, it is a dead end.
+     */
     test(show) {
       const rep = getRepresentation(show.tvmazeId);
       if (!rep?.queer) return null;
-      return { score: 10 + (show.rating || 0), reason: rep.queer.why };
+      const checked = rep.queer.tier === 'checked';
+      return {
+        score: (checked ? 12 : 8) + (show.rating || 0),
+        reason: checked
+          ? rep.queer.why
+          : `Listed under ${(rep.queer.cats || ['LGBTQ television'])[0]} on Wikipedia.`,
+        tier: rep.queer.tier,
+      };
     },
-    emptyNote: 'Only hand-checked shows appear here. No API can tell you whether a queer ' +
-               'character matters to the plot or just walks through a scene, so this list is ' +
-               'short and honest rather than long and padded.',
+    emptyNote: 'Nothing here yet. This draws on Wikipedia\'s LGBTQ television categories ' +
+               'plus shows checked by hand; if it is empty the index has not loaded.',
+  },
+  {
+    id: 'disability', label: 'Disability stories', emoji: '♿',
+    blurb: 'Disabled characters and lives, not props',
+    test(show) {
+      const rep = getRepresentation(show.tvmazeId);
+      if (!rep?.disability) return null;
+      const checked = rep.disability.tier === 'checked';
+      return {
+        score: (checked ? 12 : 8) + (show.rating || 0),
+        reason: checked
+          ? rep.disability.why
+          : `Listed under ${(rep.disability.cats || ['disability in television'])[0]} on Wikipedia.`,
+        tier: rep.disability.tier,
+      };
+    },
+    emptyNote: 'Nothing here yet. This draws on Wikipedia\'s disability-in-television ' +
+               'categories plus shows checked by hand; if it is empty the index has not loaded.',
   },
   {
     id: 'people', label: 'With people', emoji: '👯',

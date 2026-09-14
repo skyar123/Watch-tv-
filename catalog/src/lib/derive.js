@@ -169,9 +169,10 @@ export function nextUnwatched(show, watchedIds) {
   return eps.find(e => !watchedIds.has(e.id)) || null;
 }
 
-export function progress(show, watchedIds) {
+export function progress(show, watchedIds, declaredAll = false) {
   const eps = regular(show.episodes);
-  if (!eps.length) return null;
+  if (!eps.length) return declaredAll ? { done: 0, total: 0, pct: 1, declared: true } : null;
+  if (declaredAll) return { done: eps.length, total: eps.length, pct: 1, declared: true };
   const done = eps.filter(e => watchedIds.has(e.id)).length;
   return { done, total: eps.length, pct: done / eps.length };
 }

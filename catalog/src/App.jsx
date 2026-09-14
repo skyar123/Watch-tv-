@@ -8,10 +8,12 @@ import MineScreen from './screens/MineScreen.jsx';
 import NewsScreen from './screens/NewsScreen.jsx';
 import SearchScreen from './screens/SearchScreen.jsx';
 import SettingsScreen from './screens/SettingsScreen.jsx';
+import TeachScreen from './screens/TeachScreen.jsx';
 import { fetchShow } from './lib/tvmaze.js';
 import { loadCatalogue } from './lib/catalogue.js';
 import { buildIdf } from './lib/taste.js';
 import { buildKinship } from './lib/kinship.js';
+import { loadRepresentation } from './lib/representation.js';
 import { rankCatalogue, rankTogetherCatalogue, appetiteOf, describeCommonGround } from './lib/rank.js';
 import { REPRESENTATION, ENDINGS, CONTENT } from './data/curated.js';
 import { refresh } from './lib/api.js';
@@ -35,12 +37,18 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);      // { show, enriched }
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [teachOpen, setTeachOpen] = useState(false);
   const [detailShows, setDetailShows] = useState({});   // key -> full show, for taste
   const [reshuffle, setReshuffle] = useState(0);        // manual 'show me others'
   const state = useStore();
 
   // Sync on load, on returning to the app, and when coming back online.
   useEffect(() => { installSync(); }, []);
+
+  // The representation index backs the queer and disability filters and the
+  // rep: taste features, so it has to be in before the first ranking.
+  const [repReady, setRepReady] = useState(false);
+  useEffect(() => { loadRepresentation().finally(() => setRepReady(true)); }, []);
 
   const loadPool = useCallback(async () => {
     setLoading(true);
@@ -167,9 +175,11 @@ export default function App() {
     JSON.stringify(state.taste?.explicit || {}),
     reshuffle,
     // Kinship arrives asynchronously and is genuinely new information rather
-    // than something you just told it, so it earns a rebuild.
+    // than something you just told it, so it earns a rebuild. Same for the
+    // representation index.
     kinship.size,
-  ].join('|'), [state, pool.length, showsByKey.size, reshuffle, kinship.size]);
+    repReady,
+  ].join('|'), [state, pool.length, showsByKey.size, reshuffle, kinship.size, repReady]);
 
   /**
    * Swipes are deliberately NOT in orderKey.
@@ -276,7 +286,8 @@ export default function App() {
         )}
         {tab === 'mine' && (
           <MineScreen pool={pool} onOpen={openDetail} changes={changes} taste={taste}
-                      onSettings={() => setSettingsOpen(true)} />
+                      onSettings={() => setSettingsOpen(true)}
+                      onTeach={() => setTeachOpen(true)} />
         )}
         {tab === 'news' && <NewsScreen />}
         {tab === 'search' && <SearchScreen onOpen={openDetail} catalogue={pool} />}
@@ -302,7 +313,12 @@ export default function App() {
       </Sheet>
 
       <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings" peek={0.9}>
-        <SettingsScreen onClose={() => setSettingsOpen(false)} taste={taste} />
+        <SettingsScreen onClose={() => setSettingsOpen(false)} taste={taste}
+                        onTeach={() => { setSettingsOpen(false); setTeachOpen(true); }} />
+      </Sheet>
+
+      <Sheet open={teachOpen} onClose={() => setTeachOpen(false)} title="Tell it what you like" peek={0.94}>
+        <TeachScreen catalogue={pool} onClose={() => setTeachOpen(false)} />
       </Sheet>
     </div>
   );

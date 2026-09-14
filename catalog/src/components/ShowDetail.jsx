@@ -10,7 +10,8 @@ import {
 } from '../lib/derive.js';
 import { availability } from '../lib/providers.js';
 import { kidVerdict, VERDICT_TONE } from '../lib/kidsafe.js';
-import { getEnding, getRepresentation } from '../data/curated.js';
+import { getEnding } from '../data/curated.js';
+import { getRepresentation } from '../lib/representation.js';
 import { StatusBadge, ProviderRow, HoursChip, Sparkline, Unknown, Reason, Freshness } from './bits.jsx';
 
 export default function ShowDetail({ show, enriched, loading, onClose }) {
@@ -235,17 +236,16 @@ export default function ShowDetail({ show, enriched, loading, onClose }) {
           {/* Representation */}
           <Block title="Representation" icon={<Heart size={13} />}>
             {rep?.queer && (
-              <RepRow icon={<Heart size={13} />} label="Queer" level={rep.queer.level}
-                      why={rep.queer.why} checked={rep.checked} />
+              <RepRow icon={<Heart size={13} />} label="Queer" entry={rep.queer} checked={rep.checked} />
             )}
             {rep?.disability && (
-              <RepRow icon={<Accessibility size={13} />} label="Disability" level={rep.disability.level}
-                      why={rep.disability.why} checked={rep.checked} />
+              <RepRow icon={<Accessibility size={13} />} label="Disability"
+                      entry={rep.disability} checked={rep.checked} />
             )}
             {!rep && (
               <Unknown>
-                Not checked. No API records whether a queer or disabled character is a lead or
-                walks through one scene, so this is only ever filled in by hand.
+                Not listed under any queer or disability category on Wikipedia, and not checked
+                by hand. That is an absence of evidence, not evidence of absence.
               </Unknown>
             )}
           </Block>
@@ -367,12 +367,30 @@ function Block({ title, icon, children }) {
   );
 }
 
-function RepRow({ icon, label, level, why, checked }) {
+/**
+ * The tier is on the chip, not buried. "A human read this and wrote down why"
+ * and "Wikipedia files it here" are different claims and the difference is the
+ * whole reason both are shown.
+ */
+function RepRow({ icon, label, entry, checked }) {
+  const hand = entry.tier === 'checked';
   return (
     <div className="mb-2.5 last:mb-0">
-      <span className="chip border border-pop/30 bg-pop/10 text-pop-soft">{icon}{label} · {level}</span>
-      <p className="mt-1.5 text-[12.5px] leading-snug text-haze-200">{why}</p>
-      <p className="mt-0.5 text-[10px] text-haze-400">Checked by hand, {checked}.</p>
+      <span className={`chip border ${hand
+        ? 'border-pop/30 bg-pop/10 text-pop-soft'
+        : 'border-white/15 bg-white/5 text-haze-200'}`}>
+        {icon}{label}{hand ? ` · ${entry.level}` : ' · listed'}
+      </span>
+      <p className="mt-1.5 text-[12.5px] leading-snug text-haze-200">{entry.why}</p>
+      <p className="mt-0.5 text-[10px] text-haze-400">
+        {hand
+          ? `Checked by hand, ${checked}.`
+          : <>From Wikipedia's category tree{entry.wiki ? <>
+              {' · '}<a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(entry.wiki)}`}
+                 target="_blank" rel="noreferrer" className="text-mint">read the article</a>
+            </> : null}
+            {entry.ambiguous && ' · name collision, matched by popularity — worth double-checking'}</>}
+      </p>
     </div>
   );
 }

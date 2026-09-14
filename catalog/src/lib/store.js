@@ -258,6 +258,56 @@ export const actions = {
     patchProfile(id, { notForMe: n });
   },
 
+  /**
+   * "I have seen all of this", without needing the episode list.
+   *
+   * Telling the app what you have already watched is the fastest way to teach
+   * it, and demanding 62 episode taps — or 62 API calls — to record one fact
+   * would make that the slowest. The __all sentinel records the fact; episode
+   * detail can still be filled in later and simply replaces it.
+   */
+  declareFinished(show, { loved = false, on = true } = {}) {
+    const id = state.active;
+    const p = state.profiles[id];
+    const watched = { ...p.watched };
+    if (on) watched[show.key] = { ...(watched[show.key] || {}), __all: Date.now() };
+    else {
+      const forShow = { ...(watched[show.key] || {}) };
+      delete forShow.__all;
+      if (Object.keys(forShow).length) watched[show.key] = forShow; else delete watched[show.key];
+    }
+    const saved = { ...p.saved };
+    if (on && loved) {
+      saved[show.key] = { addedAt: Date.now(), name: show.name, poster: show.poster, loved: true };
+    }
+    patchProfile(id, { watched, saved,
+      lastAction: on
+        ? { kind: loved ? 'loved' : 'seen', key: show.key, name: show.name, at: Date.now() }
+        : p.lastAction });
+  },
+
+  /** Teach the OTHER person's profile without switching to it. */
+  teachProfile(profileId, show, verdict) {
+    const p = state.profiles[profileId];
+    if (!p) return;
+    const watched = { ...p.watched };
+    const saved = { ...p.saved };
+    const notForMe = { ...p.notForMe };
+    delete watched[show.key]; delete saved[show.key]; delete notForMe[show.key];
+
+    // 'clear' falls through having deleted all three, which is the toggle-off.
+    if (verdict === 'loved' || verdict === 'seen') {
+      watched[show.key] = { __all: Date.now() };
+      if (verdict === 'loved') {
+        saved[show.key] = { addedAt: Date.now(), name: show.name, poster: show.poster, loved: true };
+      }
+    } else if (verdict === 'nope') {
+      notForMe[show.key] = Date.now();
+    }
+    commit({ ...state, profiles: { ...state.profiles,
+      [profileId]: { ...p, watched, saved, notForMe, updatedAt: Date.now() } } });
+  },
+
   markWatched(showKey, episodeId, on = true) {
     const id = state.active;
     const p = state.profiles[id];

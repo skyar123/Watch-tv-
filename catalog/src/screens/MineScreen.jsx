@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Settings, AlertTriangle, TrendingUp, Bookmark, PlayCircle } from 'lucide-react';
+import { Settings, AlertTriangle, TrendingUp, Bookmark, PlayCircle, Sparkles } from 'lucide-react';
 import { useStore, actions, watchedSet } from '../lib/store.js';
 import { fetchShow } from '../lib/tvmaze.js';
 import { progress, nextUnwatched, nextEpisode, totalTime } from '../lib/derive.js';
@@ -11,7 +11,7 @@ import { ago } from '../lib/api.js';
  * Your list: what you are in the middle of, what you saved, what changed
  * service, and what to try next with the reason named.
  */
-export default function MineScreen({ pool, onOpen, changes, onSettings }) {
+export default function MineScreen({ pool, onOpen, changes, taste, onSettings, onTeach }) {
   const state = useStore();
   const [full, setFull] = useState({});      // showKey -> show with episodes
   const [recs, setRecs] = useState(null);
@@ -89,6 +89,30 @@ export default function MineScreen({ pool, onOpen, changes, onSettings }) {
           <Settings size={18} />
         </button>
       </header>
+
+      {/* The cold-start fix, offered where it is needed rather than buried in
+          Settings: with nothing to go on the feed is just "what is popular". */}
+      {(taste?.sampleSize ?? 0) < 8 && (
+        <button
+          type="button"
+          onClick={onTeach}
+          className="mb-5 flex w-full items-center gap-3 rounded-2xl border border-mint/30
+                     bg-mint/[.08] p-3 text-left transition active:scale-[.99]"
+        >
+          <Sparkles size={18} className="shrink-0 text-mint" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] font-semibold text-white">
+              Tell it what you already like
+            </span>
+            <span className="block text-[12px] leading-snug text-haze-300">
+              {taste?.sampleSize
+                ? `${taste.sampleSize} signal${taste.sampleSize > 1 ? 's' : ''} so far — a few more and it stops guessing.`
+                : 'It knows nothing about you yet, so the feed is just what is popular.'}
+              {' '}You can fill in the other profile too.
+            </span>
+          </span>
+        </button>
+      )}
 
       {/* Leaving soon — a real diff, with the date it changed */}
       {leaving.length > 0 && (
