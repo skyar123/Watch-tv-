@@ -160,9 +160,13 @@ console.log('the choice survives a reload');
 await page.locator('button[aria-label="Switch to the grid"]').click();
 await page.waitForTimeout(600);
 await page.reload({ waitUntil: 'domcontentloaded' });
-await page.waitForTimeout(2500);
-check('still in the grid after a reload',
-      await page.locator('button[aria-label="Switch to the full-screen feed"]').count() === 1);
+// Wait for the state to exist rather than sleeping a guessed number of
+// milliseconds: against the deployed site the catalogue takes longer to arrive
+// than it does from a local preview, and a fixed 2.5s sleep failed there while
+// passing locally, which is a flaky test rather than a real difference.
+const stillGrid = await page.locator('button[aria-label="Switch to the full-screen feed"]')
+  .waitFor({ state: 'attached', timeout: 30000 }).then(() => true, () => false);
+check('still in the grid after a reload', stillGrid);
 
 console.log(`\n${fails ? `${fails} failure(s)` : 'the grid is the faster way to look, and costs nothing to scroll'}`);
 await browser.close();
