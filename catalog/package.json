@@ -1,0 +1,44 @@
+{
+  "name": "tv-catalog",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "verify": "node scripts/verify-sources.mjs",
+    "verify:tmdb": "node scripts/verify-sources.mjs --tmdb",
+    "shots": "node scripts/shots.mjs",
+    "test": "node scripts/check-curated.mjs && node scripts/test-representation.mjs && node scripts/test-taste.mjs && node scripts/test-sw.mjs && node scripts/test-trailer.mjs && node scripts/test-interactions.mjs && node scripts/test-swipe.mjs && node scripts/test-grid.mjs && node scripts/test-news.mjs && node scripts/test-services.mjs && node scripts/test-teach.mjs && node scripts/test-trailer-feed.mjs",
+    "test:sw": "node scripts/test-sw.mjs",
+    "test:ui": "node scripts/test-interactions.mjs",
+    "check:curated": "node scripts/check-curated.mjs",
+    "test:trailer": "node scripts/test-trailer.mjs && node scripts/test-trailer-feed.mjs",
+    "bake": "node scripts/bake-catalogue.mjs",
+    "bake:dry": "node scripts/bake-catalogue.mjs --dry",
+    "test:rank": "node scripts/test-rank.mjs",
+    "test:taste": "node scripts/test-taste.mjs",
+    "test:swipe": "node scripts/test-swipe.mjs",
+    "test:grid": "node scripts/test-grid.mjs",
+    "test:news": "node scripts/test-news.mjs",
+    "test:services": "node scripts/test-services.mjs",
+    "test:newsmatch": "node scripts/test-newsmatch.mjs",
+    "bake:rep": "node scripts/bake-representation.mjs",
+    "test:rep": "node scripts/test-representation.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^0.454.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@netlify/blobs": "^11.0.3",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "playwright": "^1.48.2",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "vite": "^5.4.10"
+  }
+}

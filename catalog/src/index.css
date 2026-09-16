@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    /* 100dvh is right on iOS 16+; the fallback keeps older Safari usable. */
+    --screen: 100vh;
+    --screen: 100dvh;
+  }
+
+  html, body, #root { height: 100%; }
+
+  body {
+    @apply bg-ink-950 text-white font-sans antialiased;
+    /* The page itself must never bounce; scrolling happens inside panes. */
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Safari zooms the page when a focused input is under 16px and does not zoom
+     back out. There is no way to undo it, so the only fix is to never do it. */
+  input, select, textarea, button {
+    font-size: 16px;
+  }
+
+  /* iOS renders its own inner shadow and rounded corners on inputs. */
+  input[type="search"], input[type="text"] {
+    -webkit-appearance: none;
+    appearance: none;
+    border-radius: 0.75rem;
+  }
+  input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+}
+
+@layer components {
+  /* 44pt is the Apple minimum and it is a floor, not a target. */
+  .tap {
+    @apply inline-flex items-center justify-center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .sheet-scroll {
+    -webkit-overflow-scrolling: touch;
+    /* Keeps a scroll that reaches the end of the sheet from dragging the page
+       behind it. Without this the whole app rubber-bands under the sheet. */
+    overscroll-behavior: contain;
+  }
+
+  .feed-scroll {
+    scroll-snap-type: y mandatory;
+    /* The feed renders a window of cards between two spacers, so the spacer
+       heights change as you scroll. Chromium's scroll anchoring would try to
+       compensate for that and fight the scroll position. Safari has no scroll
+       anchoring, so this only makes the two behave the same. */
+    overflow-anchor: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    scrollbar-width: none;
+  }
+  .feed-scroll::-webkit-scrollbar { display: none; }
+
+  .feed-card {
+    scroll-snap-align: start;
+    /* Without snap-stop the flick momentum carries past three cards at once and
+       the feed feels like a slot machine instead of a deck. */
+    scroll-snap-stop: always;
+  }
+
+  .glass {
+    @apply bg-ink-900/70 backdrop-blur-xl;
+    /* Safari needs the prefix for backdrop-filter to apply at all. */
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px]
+           font-medium leading-none;
+  }
+}
+
+@layer utilities {
+  .pt-safe { padding-top: max(env(safe-area-inset-top), 0.5rem); }
+  .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0.5rem); }
+  .px-safe {
+    padding-left: max(env(safe-area-inset-left), 1rem);
+    padding-right: max(env(safe-area-inset-right), 1rem);
+  }
+  .h-screen-d { height: var(--screen); }
+  .min-h-screen-d { min-height: var(--screen); }
+
+  /* Text over artwork needs a floor of contrast that a gradient alone misses
+     against a bright frame. */
+  .text-shadow-soft { text-shadow: 0 1px 12px rgba(0,0,0,.7), 0 1px 3px rgba(0,0,0,.9); }
+
+  .no-drag { -webkit-user-drag: none; user-select: none; }
+}
+
+/* Layout decisions follow the input device, not the width. A phone in
+   landscape is 844px across and still has no cursor; a width breakpoint gets
+   that exactly wrong. */
+@media (pointer: coarse) {
+  .coarse-only { display: revert; }
+  .fine-only   { display: none !important; }
+}
+@media (pointer: fine) {
+  .coarse-only { display: none !important; }
+  .fine-only   { display: revert; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

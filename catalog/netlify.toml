@@ -1,0 +1,46 @@
+# Netlify reads this from the site's *base directory*. In the Netlify UI set
+# Base directory = catalog, so this repo can keep hosting the other app at root.
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to   = "/.netlify/functions/:splat"
+  status = 200
+
+# SPA fallback, but never for the service worker or the manifest.
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
+
+# The service worker must never be served from a stale HTTP cache or the app
+# can get permanently stuck on an old worker.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Netlify guesses application/octet-stream for .webmanifest. Safari is lenient
+# about it but Chrome logs a manifest error and some installers refuse it.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# availability-snapshot declares its own schedule in the function file, the way
+# Functions v2 wants it. Nothing to configure here.
