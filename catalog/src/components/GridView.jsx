@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Bookmark, BookmarkCheck, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bookmark, BookmarkCheck, X, Check, SlidersHorizontal } from 'lucide-react';
 import { ageOf } from '../lib/rank.js';
+import { STREAMERS, MINE } from '../lib/services.js';
 
 /**
  * The 2-up grid.
@@ -33,10 +34,13 @@ const COLUMNS = 2;
 const WINDOW_ROWS = 6;     // rows kept live above and below the viewport
 export default function GridView({
   shows, saved, onOpenShow, onSave, onHide, scrollRef,
+  services = [], activeService = null, onService,
+  subscribed, onToggleService, mineCount = 0,
 }) {
   // Row height is derived from the measured width rather than assumed, because
   // it has to match the real tiles exactly or the placeholders shift the grid.
   const [geom, setGeom] = useState({ rowH: 0, top: 0, height: 0 });
+  const gridRef = useRef(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -46,7 +50,14 @@ export default function GridView({
       frame = 0;
       const width = el.clientWidth - 16;                       // px-2 either side
       const tileW = (width - GAP_PX * (COLUMNS - 1)) / COLUMNS;
-      setGeom({ rowH: tileW * 1.5 + GAP_PX, top: el.scrollTop, height: el.clientHeight });
+      // The service chips sit above the grid inside the same scroller, so row
+      // zero does not start at scrollTop zero. Measuring the offset rather than
+      // assuming it keeps the window centred on what is actually on screen.
+      const offset = gridRef.current
+        ? gridRef.current.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+        : 0;
+      setGeom({ rowH: tileW * 1.5 + GAP_PX, top: Math.max(0, el.scrollTop - offset),
+                height: el.clientHeight });
     };
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -79,7 +90,13 @@ export default function GridView({
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 5.5rem)',
       }}
     >
-      <div className="grid grid-cols-2 gap-2">
+      {services.length > 0 && (
+        <ServiceRow
+          services={services} active={activeService} onPick={onService}
+          subscribed={subscribed} onToggleService={onToggleService} mineCount={mineCount}
+        />
+      )}
+      <div ref={gridRef} className="grid grid-cols-2 gap-2">
         {shows.map((show, i) => {
           const row = Math.floor(i / COLUMNS);
           if (row < firstRow || row > lastRow) {
@@ -204,6 +221,121 @@ function TileAction({ children, onClick, label, active, className }) {
                         ${active ? 'text-gold' : 'text-white/85'}`}>
         {children}
       </span>
+    </button>
+  );
+}
+
+/**
+ * Browse one service at a time, and say which ones you pay for.
+ *
+ * "Apple TV included? HBO? Prime?" deserves an answer with a number on it, so
+ * every chip carries its real count from the index. The counts are the reason
+ * this is worth having: HBO used to be three separate things (HBO 308, HBO Max
+ * 215, Max 3) and reads 546 now, and before the feed was uncapped you could
+ * reach eleven Apple TV shows out of 206.
+ *
+ * It is a horizontal scroller rather than a wrapped block because there are 302
+ * services with a dozen shows or more, and a grid of 302 chips is a wall.
+ *
+ * The row does double duty. Normally a tap filters. In edit mode it narrows to
+ * the subscription services and a tap toggles whether you pay for that one,
+ * which is the shortest path from "is Apple TV in here" to "and I have Apple
+ * TV, so put it first". The two modes are never live at once and the row says
+ * which one it is in, because a chip that silently means two different things
+ * is how you end up unsubscribing from Netflix by trying to browse it.
+ */
+function ServiceRow({ services, active, onPick, subscribed, onToggleService, mineCount }) {
+  const [editing, setEditing] = useState(false);
+  const mine = subscribed || new Set();
+
+  return (
+    <div className="-mx-2 mb-2 px-2">
+      <div
+        className="flex gap-1.5 overflow-x-auto pb-1"
+        // No touch-action override: pinning this to pan-x would stop a vertical
+        // swipe that happens to start on the chips from scrolling the grid, and
+        // the browser already handles a nested horizontal scroller correctly.
+        style={{ scrollbarWidth: 'none' }}
+        role="group"
+        aria-label={editing ? 'Choose the services you subscribe to' : 'Filter by service'}
+      >
+        <Chip
+          active={editing}
+          onClick={() => setEditing(e => !e)}
+          label={editing ? 'Done choosing services' : 'Choose the services you subscribe to'}
+        >
+          {editing ? <Check size={13} /> : <SlidersHorizontal size={13} />}
+          {editing ? 'Done' : 'Mine'}
+        </Chip>
+
+        {editing ? (
+          STREAMERS.map(s => (
+            <Chip
+              key={s.id} active={mine.has(s.id)} colour={s.colour}
+              onClick={() => onToggleService?.(s.id)}
+              label={mine.has(s.id) ? `You subscribe to ${s.name}. Tap to remove.`
+                                    : `Add ${s.name} to the services you subscribe to`}
+            >
+              {mine.has(s.id) && <Check size={12} />}
+              {s.name}
+            </Chip>
+          ))
+        ) : (
+          <>
+            <Chip active={!active} onClick={() => onPick?.(null)}>Everything</Chip>
+            {mine.size > 0 && (
+              <Chip active={active === MINE} yours
+                    onClick={() => onPick?.(active === MINE ? null : MINE)}
+                    label="Show everything across the services you subscribe to">
+                Your services
+                <span className={active === MINE ? 'text-white/70' : 'text-haze-500'}>
+                  {mineCount.toLocaleString()}
+                </span>
+              </Chip>
+            )}
+            {services.map(s => (
+              <Chip key={s.id} active={active === s.id} colour={s.colour} yours={s.yours}
+                    onClick={() => onPick?.(active === s.id ? null : s.id)}>
+                {s.name}
+                <span className={active === s.id ? 'text-white/70' : 'text-haze-500'}>
+                  {s.count.toLocaleString()}
+                </span>
+              </Chip>
+            ))}
+          </>
+        )}
+      </div>
+      {editing && (
+        <p className="pb-1 text-[11px] leading-snug text-haze-400">
+          Tap the ones you pay for. They move to the front of the row, and
+          &ldquo;Your services&rdquo; collects everything across all of them. This is
+          where a show comes from, not proof it is streaming there tonight.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Chip({ children, active, colour, yours, onClick, label }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={label}
+      // A service you pay for gets a visible edge as well as its place at the
+      // front of the row, so the ordering is explained rather than just felt.
+      className={`tap shrink-0 gap-1.5 whitespace-nowrap rounded-full border px-3
+                  text-[12.5px] font-medium transition active:scale-95
+        ${active ? 'border-white/30 bg-white/12 text-white'
+                 : yours ? 'border-mint/35 bg-mint/[.07] text-haze-200'
+                         : 'border-white/10 bg-white/[.03] text-haze-300'}`}
+    >
+      {colour && (
+        <span className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: colour, opacity: active ? 1 : 0.75 }} />
+      )}
+      {children}
     </button>
   );
 }

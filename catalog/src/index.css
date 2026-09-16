@@ -52,6 +52,11 @@
 
   .feed-scroll {
     scroll-snap-type: y mandatory;
+    /* The feed renders a window of cards between two spacers, so the spacer
+       heights change as you scroll. Chromium's scroll anchoring would try to
+       compensate for that and fight the scroll position. Safari has no scroll
+       anchoring, so this only makes the two behave the same. */
+    overflow-anchor: none;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
     scrollbar-width: none;

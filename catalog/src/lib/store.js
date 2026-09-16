@@ -21,6 +21,36 @@ const LEGACY_KEY = 'tonight:v1';
 
 export const TOGETHER = 'together';
 
+/**
+ * How much scroll history is worth keeping. The ranker's fatigue term only
+ * reads the last day; the cap is a backstop for one very long sitting.
+ */
+const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
+const SEEN_CAP = 800;
+
+/**
+ * Add `key` to a seen map and drop what is no longer worth keeping.
+ *
+ * Exported and pure so the bound can be tested directly. Testing it through
+ * the feed only proves that scrolling fast does not record much, which is not
+ * the same claim.
+ */
+export function trimSeen(seen, key, now = Date.now()) {
+  const next = { ...seen, [key]: now };
+  const keys = Object.keys(next);
+  if (keys.length <= SEEN_CAP) return next;
+
+  // Sorting only happens on the swipe that crosses the cap, not on every card.
+  const fresh = keys.filter(k => now - next[k] < SEEN_TTL_MS);
+  const kept = fresh.length > SEEN_CAP
+    ? fresh.sort((a, b) => next[b] - next[a]).slice(0, SEEN_CAP)
+    : fresh;
+  const out = {};
+  for (const k of kept) out[k] = next[k];
+  out[key] = now;                           // never drop the one just seen
+  return out;
+}
+
 const emptyProfile = (name, emoji) => ({
   name,
   emoji,
@@ -47,6 +77,10 @@ const EMPTY = {
   // it is a way of using the app, not a transient toggle, and being dropped
   // back into the feed every launch would make the grid feel like a detour.
   feedView: 'feed',
+  // Browse one service at a time: a bucket id from lib/services.js, or null for
+  // everything. Shared rather than per-profile, because it is a view of the
+  // catalogue and not a fact about a person.
+  serviceFilter: null,
   profiles: {
     p1: emptyProfile('Skylar', '🌙'),
     p2: emptyProfile('Anja', '✨'),
@@ -137,6 +171,7 @@ export function view(s = state) {
       household: s.household,
       hideUnavailable: s.hideUnavailable,
       feedView: s.feedView || 'feed',
+      serviceFilter: s.serviceFilter ?? null,
       lastSyncAt: s.lastSyncAt,
       // Who else is on this link, for the Together copy.
       others: people.filter(([k]) => k !== id).map(([k, p]) => ({ id: k, ...p })),
@@ -153,6 +188,7 @@ export function view(s = state) {
     household: s.household,
     hideUnavailable: s.hideUnavailable,
     feedView: s.feedView || 'feed',
+    serviceFilter: s.serviceFilter ?? null,
     lastSyncAt: s.lastSyncAt,
     others: people.map(([k, p]) => ({ id: k, ...p })),
     // Union: you watch together on one screen, so either subscription works.
@@ -343,11 +379,26 @@ export const actions = {
   setServices(list) { patchProfile(state.active, { services: list }); },
   setHideUnavailable(v) { commit({ ...state, hideUnavailable: Boolean(v) }); },
   setFeedView(v) { commit({ ...state, feedView: v === 'grid' ? 'grid' : 'feed' }); },
+  setServiceFilter(id) { commit({ ...state, serviceFilter: id || null }); },
+  /**
+   * Remember that a card went past, and forget it again.
+   *
+   * This is bounded on purpose. The feed used to hand over 457 shows, so an
+   * unbounded map of everything scrolled past was a few hundred entries. It now
+   * hands over 32,138, and this runs on every card: an uncapped map means every
+   * swipe copies a map that grows all session (quadratic), then a megabyte of
+   * timestamps in localStorage that also has to sync.
+   *
+   * Nothing downstream wants more than that anyway. The ranker's fatigue term
+   * only looks at the last 24 hours, so entries past that window are dead
+   * weight, and the cap is a backstop for one very long sitting.
+   */
   markSeen(key) {
     const id = state.active;
     const p = state.profiles[id];
     if (p.seen[key] && Date.now() - p.seen[key] < 60000) return;   // do not thrash storage
-    patchProfile(id, { seen: { ...p.seen, [key]: Date.now() } });
+
+    patchProfile(id, { seen: trimSeen(p.seen, key) });
   },
   logMood(mood, pickedKey) {
     const id = state.active;

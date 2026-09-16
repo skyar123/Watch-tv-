@@ -371,7 +371,20 @@ function headline(terms) {
  * model is NOT confident about, and the card says so out loud rather than
  * pretending it was a match.
  */
-export function rankCatalogue(candidates, ctx, { limit = 400, exploreEvery = 7 } = {}) {
+/**
+ * `curated` is how far down the list the careful interleaving applies, NOT how
+ * much of the catalogue you get. It used to be both, and that was the bug:
+ * `limit = 400` meant the app was handed 457 rows out of 32,138 and the other
+ * 31,681 could not be reached by any amount of scrolling. Measured per service,
+ * you could get to 11 of 206 Apple TV shows, 4 of 215 on HBO Max, 1 of 155 on
+ * Peacock and none at all of AMC+.
+ *
+ * Everything is now returned in rank order. The top `curated` slots keep the
+ * exploration interleave, because that is where the ordering is worth thinking
+ * about, and the tail follows in plain descending score. Scoring already ran
+ * over every candidate, so this costs a slice rather than any more work.
+ */
+export function rankCatalogue(candidates, ctx, { curated = 400, exploreEvery = 7 } = {}) {
   const scored = [];
   for (const show of candidates) {
     if (ctx.notForMe?.[show.key]) continue;
@@ -388,11 +401,11 @@ export function rankCatalogue(candidates, ctx, { limit = 400, exploreEvery = 7 }
   }
   scored.sort((a, b) => b.total - a.total);
 
-  const head = scored.slice(0, limit);
+  const head = scored.slice(0, curated);
+  const tail = scored.slice(curated);
   // Candidates that are good on their own merits but that the taste model has
   // nothing to say about — the honest definition of "a stretch".
-  const unknown = scored
-    .slice(limit)
+  const unknown = tail
     .filter(s =>
       !s.terms.some(t => t.name === 'taste') &&
       (s.show.rating ?? 0) >= 7.6 &&
@@ -408,14 +421,16 @@ export function rankCatalogue(candidates, ctx, { limit = 400, exploreEvery = 7 }
       !s.warnings.length)
     .sort((a, b) => (b.show.rating ?? 0) - (a.show.rating ?? 0));
 
-  if (!unknown.length) return head;
+  if (!unknown.length) return head.concat(tail);
 
   const out = [];
+  const promoted = new Set();
   let u = 0;
   for (let i = 0; i < head.length; i++) {
     out.push(head[i]);
     if ((i + 1) % exploreEvery === 0 && u < unknown.length) {
       const pick = unknown[u++];
+      promoted.add(pick.show.key);
       out.push({
         ...pick,
         explore: true,
@@ -424,6 +439,10 @@ export function rankCatalogue(candidates, ctx, { limit = 400, exploreEvery = 7 }
       });
     }
   }
+  // The rest of the catalogue, in rank order, minus the ones already pulled up
+  // into an exploration slot. Without that subtraction a stretch pick appeared
+  // twice and React had two children with the same key.
+  for (const s of tail) if (!promoted.has(s.show.key)) out.push(s);
   return out;
 }
 
@@ -434,7 +453,7 @@ export function rankCatalogue(candidates, ctx, { limit = 400, exploreEvery = 7 }
  * actively dislikes makes for a bad evening even if the other adores it, and
  * summing hides exactly that. Netflix has profiles; it does not have this.
  */
-export function rankTogetherCatalogue(candidates, people, ctx, { limit = 400 } = {}) {
+export function rankTogetherCatalogue(candidates, people, ctx, { limit = Infinity } = {}) {
   const common = commonGround(people);
   const scored = [];
   for (const show of candidates) {
@@ -475,7 +494,10 @@ export function rankTogetherCatalogue(candidates, people, ctx, { limit = 400 } =
                 : per.some(x => x.s.confidence === 'guessing') ? 'guessing' : 'thin',
     });
   }
-  return scored.sort((a, b) => b.total - a.total).slice(0, limit);
+  // Everything, in rank order. The 400-row cap that used to be here made most
+  // of the catalogue unreachable for two people just as it did for one.
+  scored.sort((a, b) => b.total - a.total);
+  return Number.isFinite(limit) ? scored.slice(0, limit) : scored;
 }
 
 /**

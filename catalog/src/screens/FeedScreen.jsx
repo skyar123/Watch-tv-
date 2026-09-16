@@ -10,6 +10,8 @@ import { fetchShow } from '../lib/tvmaze.js';
 import { recordSwipe } from '../lib/session.js';
 import { featuresOf } from '../lib/taste.js';
 import { Freshness } from '../components/bits.jsx';
+import { bucketOf, bucketName, countByService, subscribedIds, serviceById, MINE }
+  from '../lib/services.js';
 import { resolveId, fetchTrailer, fetchProviders, fetchShowExtra, backdropUrl } from '../lib/tmdb.js';
 import { getEnding } from '../data/curated.js';
 import { cliffhangerRisk } from '../lib/derive.js';
@@ -39,16 +41,55 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
    */
   const jumpTo = useRef(null);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [cardH, setCardH] = useState(0);
   const [muted, setMuted] = useState(true);
   const [enrichment, setEnrichment] = useState({});   // showKey -> { trailerKey, providers, ... }
   const claimed = useRef(new Set());                  // shows already being fetched
   const state = useStore();
   const isGrid = state.feedView === 'grid';
 
-  const visible = useMemo(
-    () => shows.filter(s => !state.notForMe[s.key]),
-    [shows, state.notForMe],
+  /**
+   * Every service in the catalogue, biggest first, counted from the real rows.
+   * Derived from the unfiltered list so the counts do not shrink as you filter,
+   * which would make the chips lie about how much is there.
+   */
+  const serviceCounts = useMemo(
+    () => countByService(shows, { mine: state.services }),
+    [shows, state.services],
   );
+
+  /** The service ids behind this profile's subscription list. */
+  const mineIds = useMemo(() => subscribedIds(state.services), [state.services]);
+
+  const visible = useMemo(() => {
+    const kept = shows.filter(s => !state.notForMe[s.key]);
+    if (!state.serviceFilter) return kept;
+    if (state.serviceFilter === MINE) return kept.filter(s => mineIds.has(bucketOf(s)));
+    return kept.filter(s => bucketOf(s) === state.serviceFilter);
+  }, [shows, state.notForMe, state.serviceFilter, mineIds]);
+
+  // Counted over everything, so the chip does not shrink while you use it.
+  const mineCount = useMemo(
+    () => shows.reduce((n, s) => n + (mineIds.has(bucketOf(s)) ? 1 : 0), 0),
+    [shows, mineIds],
+  );
+
+  /**
+   * Turning a service on or off writes the profile's subscription list, which
+   * is stored by the names providers.js uses, because that is what the TMDB
+   * availability lookup speaks when a key exists. So the id is translated back
+   * on the way out rather than a second list being kept in step by hand.
+   */
+  const toggleService = useCallback(id => {
+    const def = serviceById(id);
+    if (!def) return;
+    const label = def.provider || def.name;
+    const current = state.services || [];
+    const has = subscribedIds(current).has(id);
+    actions.setServices(has
+      ? current.filter(n => !subscribedIds([n]).has(id))
+      : [...current, label]);
+  }, [state.services]);
 
   // Switching profile changes the whole order, so start from the top rather
   // than leaving you halfway down someone else's feed.
@@ -57,11 +98,18 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
   // rebuilt: the scroll position is preserved by the browser but now points at
   // a completely different show. Keying on the first show's identity catches
   // both cases and ignores harmless re-renders.
+  /**
+   * Move the feed to a row.
+   *
+   * Never scroll a windowed snap container directly: only rendered cards carry
+   * a snap point, so a scroll into the spacer region is dragged back to the
+   * nearest real card. This sets the window and leaves the scrolling to the
+   * effect below, which runs once the target row exists.
+   */
+  const goToRow = useCallback(i => { jumpTo.current = i; setActiveIdx(i); }, []);
+
   const topKey = visible[0]?.key;
-  useEffect(() => {
-    containerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
-    setActiveIdx(0);
-  }, [state.profileId, topKey]);
+  useEffect(() => { goToRow(0); }, [state.profileId, topKey, goToRow]);
 
   /**
    * Which card is centred.
@@ -84,6 +132,10 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
     const read = () => {
       frame = 0;
       const h = root.clientHeight || 1;
+      // The same number drives the index arithmetic and the spacer heights, so
+      // the windowed list and the scroll position cannot disagree about where
+      // a card starts.
+      setCardH(prev => (prev === h ? prev : h));
       const i = Math.round(root.scrollTop / h);
       setActiveIdx(prev => (prev === i ? prev : Math.max(0, Math.min(i, visible.length - 1))));
     };
@@ -120,13 +172,21 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
    */
   useEffect(() => {
     if (isGrid || jumpTo.current == null) return;
-    const i = jumpTo.current;
-    jumpTo.current = null;
     const root = containerRef.current;
     if (!root) return;
+    const i = jumpTo.current;
+
+    // Two passes, and the order matters. Only rendered cards carry
+    // `scroll-snap-align`, and the feed snaps on `mandatory`, so scrolling into
+    // the spacer region lands on nothing and the browser drags the scroll back
+    // to the nearest real card: a jump to row 20,000 arrived at row 3, and
+    // switching profile left the scroll at row 2,800 with the window at the
+    // top. So move the window first, let it render, and scroll on the next pass
+    // when the target has a snap point to land on.
+    if (activeIdx !== i) { setActiveIdx(i); return; }
+    jumpTo.current = null;
     root.scrollTo({ top: i * root.clientHeight, behavior: 'instant' });
-    setActiveIdx(i);
-  }, [isGrid]);
+  }, [isGrid, activeIdx]);
 
   // Enrich the active card and the next two. Nothing further ahead.
   //
@@ -288,6 +348,16 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
     );
   }
 
+  /**
+   * The rendered window. Three cards either side is what the old placeholder
+   * rule already kept alive, so nothing about how much decodes has changed.
+   * Before the first measurement there is no spacer arithmetic to do, and the
+   * feed is at the top anyway, so it renders the first few rows flat.
+   */
+  const WINDOW = 3;
+  const firstRow = cardH ? Math.max(0, activeIdx - WINDOW) : 0;
+  const lastRow = Math.min(visible.length - 1, (cardH ? activeIdx : 0) + WINDOW);
+
   return (
     <div className="relative">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start
@@ -297,10 +367,13 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
           <span className="rounded-full glass px-3 py-1 text-[11px] text-haze-300">
             {/* "12 / 457" is a position, and the grid has no single position.
                 Showing one anyway would be a number that means nothing. */}
-            {isGrid ? `${visible.length} shows` : `${activeIdx + 1} / ${visible.length}`}
-            {meta?.total > visible.length && (
-              <span className="text-haze-400"> of {meta.total.toLocaleString()}</span>
-            )}
+            {isGrid ? `${visible.length.toLocaleString()} shows`
+                    : `${(activeIdx + 1).toLocaleString()} / ${visible.length.toLocaleString()}`}
+            {state.serviceFilter
+              ? <span className="text-mint"> · {bucketName(state.serviceFilter)}</span>
+              : meta?.total > visible.length && (
+                  <span className="text-haze-400"> of {meta.total.toLocaleString()}</span>
+                )}
             {meta?.loaded === 'core' && <span className="text-gold"> · loading more</span>}
           </span>
         </div>
@@ -344,42 +417,61 @@ export default function FeedScreen({ shows, meta, loading, onOpen, onRefresh,
           saved={state.saved}
           scrollRef={gridRef}
           onOpenShow={(show, i) => { jumpTo.current = i; actions.setFeedView('feed'); }}
+          services={serviceCounts}
+          activeService={state.serviceFilter}
+          onService={id => actions.setServiceFilter(id)}
+          subscribed={mineIds}
+          onToggleService={toggleService}
+          mineCount={mineCount}
           onSave={handleSave}
           onHide={handleHide}
         />
       ) : (
       <div ref={containerRef} className="feed-scroll h-screen-d overflow-y-scroll">
-        {visible.map((show, i) => {
+        {/*
+          Only the cards around you exist. Everything above and below is a
+          single spacer of the exact remaining height.
+
+          This used to render one element per show and lean on cheap
+          placeholders for the far ones, which was fine at 457 shows and is not
+          fine at 32,138: that is 32,138 wrappers for React to reconcile on
+          every swipe, before a single pixel is painted. The spacers keep the
+          scroll height at exactly `count * cardH`, so the scrollbar, the index
+          arithmetic and a jump straight to row 20,000 all still work.
+
+          Windowing is safe here specifically because of `scroll-snap-stop:
+          always` in index.css: one gesture can move at most one card, so the
+          window can never be outrun by momentum.
+        */}
+        {firstRow > 0 && <div style={{ height: firstRow * cardH }} aria-hidden="true" />}
+        {visible.slice(firstRow, lastRow + 1).map((show, k) => {
+          const i = firstRow + k;
           const e = enrichment[show.key];
           const rich = e?.full || show;      // episodes arrive with enrichment
           const isActive = i === activeIdx;
-          // Cards far from the viewport render as a cheap placeholder: the snap
-          // geometry stays exact, but nothing decodes.
-          const near = Math.abs(i - activeIdx) <= 3;
           return (
             <div key={show.key} data-idx={i}>
-              {near ? (
-                <FeedCard
-                  show={rich}
-                  index={i}
-                  active={isActive}
-                  enriched={e}
-                  trailerKey={isActive ? e?.trailerKey : null}
-                  availability={availability(e?.providers, state.services)}
-                  time={totalTime(rich)}
-                  muted={muted}
-                  onToggleMute={() => setMuted(m => !m)}
-                  onOpen={handleOpen}
-                  onSave={handleSave}
-                  onHide={handleHide}
-                  saved={Boolean(state.saved[show.key])}
-                />
-              ) : (
-                <div className="feed-card h-screen-d w-full bg-ink-950" aria-hidden="true" />
-              )}
+              <FeedCard
+                show={rich}
+                index={i}
+                active={isActive}
+                enriched={e}
+                trailerKey={isActive ? e?.trailerKey : null}
+                availability={availability(e?.providers, state.services)}
+                time={totalTime(rich)}
+                muted={muted}
+                onToggleMute={() => setMuted(m => !m)}
+                onOpen={handleOpen}
+                onSave={handleSave}
+                onHide={handleHide}
+                saved={Boolean(state.saved[show.key])}
+              />
             </div>
           );
         })}
+        {lastRow < visible.length - 1 && (
+          <div style={{ height: (visible.length - 1 - lastRow) * cardH }} aria-hidden="true" />
+        )}
       </div>
       )}
     </div>
